@@ -1,0 +1,3 @@
+# symlinkを使わずコピーベースで同期する
+
+管理対象ファイルの配置にsymlinkを使わず、push/pullによるファイルコピーで同期することにした。Windows/WSLでのsymlink制約を避け、ghq等でStoreを任意のパスに置いても問題なく動作させるため。
