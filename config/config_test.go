@@ -112,18 +112,14 @@ func TestExpandDest(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (Store 発見)
-// カレントから親方向への mdots.yaml 探索を t.TempDir() の実FSで検証する。
+// カレント直下の mdots.yaml のみを参照する外部挙動を t.TempDir() の実FSで検証する。
 func TestFindStore(t *testing.T) {
-	t.Run("親方向にStoreを発見できる", func(t *testing.T) {
+	t.Run("カレント直下のStoreを発見できる", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.WriteFile(filepath.Join(root, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		sub := filepath.Join(root, "a", "b")
-		if err := os.MkdirAll(sub, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		got, err := FindStore(sub)
+		got, err := FindStore(root)
 		if err != nil {
 			t.Fatalf("FindStore error: %v", err)
 		}
@@ -132,20 +128,35 @@ func TestFindStore(t *testing.T) {
 		}
 	})
 
-	t.Run("見つからないときは明確なエラー", func(t *testing.T) {
+	t.Run("サブディレクトリからは失敗しin形式のエラー", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sub := filepath.Join(root, "a", "b")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := FindStore(sub)
+		if err == nil {
+			t.Fatal("エラー expected, got nil")
+		}
+		if !strings.Contains(err.Error(), "mdots.yaml not found in "+sub) {
+			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.yaml not found in "+sub)
+		}
+	})
+
+	t.Run("見つからないときはin形式のエラー", func(t *testing.T) {
 		start := t.TempDir()
 		_, err := FindStore(start)
 		if err == nil {
 			t.Fatal("エラー expected, got nil")
 		}
-		if !strings.HasPrefix(err.Error(), "mdots.yaml not found: searched from ") {
-			t.Errorf("エラーメッセージのprefix不正: got %q", err.Error())
+		if !strings.Contains(err.Error(), "mdots.yaml not found in "+start) {
+			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.yaml not found in "+start)
 		}
-		if !strings.HasSuffix(err.Error(), " to /") {
-			t.Errorf("エラーメッセージのsuffix不正: got %q", err.Error())
-		}
-		if !strings.Contains(err.Error(), start) {
-			t.Errorf("エラーに探索起点が含まれない: got %q, want contain %q", err.Error(), start)
+		if strings.Contains(err.Error(), "searched from") {
+			t.Errorf("旧文言が残っている: got %q", err.Error())
 		}
 	})
 }

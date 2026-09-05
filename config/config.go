@@ -147,22 +147,15 @@ func (e Entry) ExpandedDest() (string, error) {
 	return ExpandDest(e.Dest)
 }
 
-// FindStore は開始ディレクトリから親方向に mdots.yaml を探索し、
-// 見つかった Store ルートを返す。見つからないときは明確なエラーを返す。
+// FindStore はカレント直下の mdots.yaml のみを参照し、
+// 見つかった Store ルートを返す。見つからないときは in <cwd> 形式のエラーを返す。
 func FindStore(startDir string) (string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", err
 	}
-	orig := abs
-	for {
-		if _, err := os.Stat(filepath.Join(abs, "mdots.yaml")); err == nil {
-			return abs, nil
-		}
-		parent := filepath.Dir(abs)
-		if parent == abs {
-			return "", fmt.Errorf("mdots.yaml not found: searched from %s to /", orig)
-		}
-		abs = parent
+	if _, err := os.Stat(filepath.Join(abs, "mdots.yaml")); err == nil {
+		return abs, nil
 	}
+	return "", fmt.Errorf("mdots.yaml not found in %s", abs)
 }
