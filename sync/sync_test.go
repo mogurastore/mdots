@@ -3,7 +3,6 @@ package sync
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/mogurastore/mdots/config"
@@ -296,100 +295,5 @@ func TestPushMissingSrcIsError(t *testing.T) {
 	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
 	if err := Push(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
-	}
-}
-
-// Seam: sync パッケージ公開境界 (diff)
-// Store/src と dest の差分を diff -u 風に出力する。実FSで検証する。
-func TestDiffNoDiffWhenIdentical(t *testing.T) {
-	store, destRoot := setupSyncDirs(t)
-
-	srcPath := filepath.Join(store, "vimrc")
-	writeTestFile(t, srcPath, "set number\n")
-	dest := filepath.Join(destRoot, ".vimrc")
-	writeTestFile(t, dest, "set number\n")
-	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
-
-	out, hasDiff, err := Diff(store, entries)
-	if err != nil {
-		t.Fatalf("Diff error: %v", err)
-	}
-	if hasDiff {
-		t.Error("hasDiff = true, want false")
-	}
-	if out != "" {
-		t.Errorf("output = %q, want empty", out)
-	}
-}
-
-func TestDiffShowsUnifiedDiffWhenDifferent(t *testing.T) {
-	store, destRoot := setupSyncDirs(t)
-
-	srcPath := filepath.Join(store, "vimrc")
-	writeTestFile(t, srcPath, "set number\n")
-	dest := filepath.Join(destRoot, ".vimrc")
-	writeTestFile(t, dest, "set nonumber\n")
-	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
-
-	out, hasDiff, err := Diff(store, entries)
-	if err != nil {
-		t.Fatalf("Diff error: %v", err)
-	}
-	if !hasDiff {
-		t.Fatal("hasDiff = false, want true")
-	}
-	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
-		t.Errorf("output should contain ---/+++, got %q", out)
-	}
-}
-
-func TestDiffMissingFileIsError(t *testing.T) {
-	t.Run("src不在はエラー", func(t *testing.T) {
-		store, destRoot := setupSyncDirs(t)
-		dest := filepath.Join(destRoot, "a")
-		writeTestFile(t, dest, "a")
-		entries := []config.Entry{{Src: "missing", Dest: dest}}
-		if _, _, err := Diff(store, entries); err == nil {
-			t.Error("エラー expected, got nil")
-		}
-	})
-
-	t.Run("dest不在はエラー", func(t *testing.T) {
-		store, destRoot := setupSyncDirs(t)
-		writeTestFile(t, filepath.Join(store, "a"), "a")
-		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "missing")}}
-		if _, _, err := Diff(store, entries); err == nil {
-			t.Error("エラー expected, got nil")
-		}
-	})
-}
-
-func TestDiffMultipleEntriesOnlyDifferingOutput(t *testing.T) {
-	store, destRoot := setupSyncDirs(t)
-
-	writeTestFile(t, filepath.Join(store, "same"), "same\n")
-	writeTestFile(t, filepath.Join(destRoot, "same"), "same\n")
-	writeTestFile(t, filepath.Join(store, "changed"), "old\n")
-	writeTestFile(t, filepath.Join(destRoot, "changed"), "new\n")
-	entries := []config.Entry{
-		{Src: "same", Dest: filepath.Join(destRoot, "same")},
-		{Src: "changed", Dest: filepath.Join(destRoot, "changed")},
-	}
-
-	out, hasDiff, err := Diff(store, entries)
-	if err != nil {
-		t.Fatalf("Diff error: %v", err)
-	}
-	if !hasDiff {
-		t.Fatal("hasDiff = false, want true")
-	}
-	if !strings.Contains(out, "changed") {
-		t.Errorf("output should mention changed Entry, got %q", out)
-	}
-	if strings.Contains(out, "--- same") {
-		t.Errorf("output should NOT contain same Entry, got %q", out)
-	}
-	if !strings.Contains(out, "-old") || !strings.Contains(out, "+new") {
-		t.Errorf("output should contain -/+ lines, got %q", out)
 	}
 }

@@ -1,7 +1,7 @@
 # mdots
 
 dotfilesをファイルコピー（非symlink）で管理するCLI。
-Store（`mdots.toml` を含む管理リポジトリのルート）とホーム側を `push` / `pull` / `diff` で同期する。
+Store（`mdots.toml` を含む管理リポジトリのルート）とホーム側を `push` / `pull` で同期する。
 
 ## 導入
 
@@ -47,7 +47,7 @@ target = ["win", "wsl"]
 mdots push              # common のみを Store から dest へコピー
 mdots push --target win # common + win を対象にする
 mdots pull --target win # dest から Store へ回収する
-mdots diff              # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
+mdots push --dry-run    # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
 ```
 
 ## 使い方
@@ -65,7 +65,6 @@ mdots --version         # バージョンを表示する（ldflags -X main.versi
 | --- | --- |
 | `push [--target <name>] [--dry-run]` | Store から dest へコピーする |
 | `pull [--target <name>] [--dry-run]` | dest から Store へ回収する |
-| `diff [--target <name>]` | Store と dest の差分を表示する |
 | `init` | カレント直下に `mdots.toml` 雛形を作る |
 
 - `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。

@@ -1,10 +1,10 @@
 // Package cli は mdots のコマンド骨格を定義する。
 //
-// CLIフレームワークの最終採用は urfave/cli v3（宣言ツリーで push/pull/diff と
+// CLIフレームワークの最終採用は urfave/cli v3（宣言ツリーで push/pull と
 // --target/--dry-run を定義する）。pflagのみによる自前解析は段階移行の予備案
 // として残すが、既定は v3 とする（spec #24 の Implementation Decisions による）。
 //
-// CLI表面（help/version/unknown時の文面・--target形式・push/pullのみ--dry-run・
+// CLI表面（help/version/unknown時の文面・--target形式・--dry-run・
 // exitの振る舞い）は凍結値のまま変えない。内部実行は Executor 委譲とし、
 // エントリは薄く保つ。
 package cli
@@ -19,7 +19,7 @@ import (
 	cliv3 "github.com/urfave/cli/v3"
 )
 
-const GlobalHelp = `usage: mdots <push|pull|diff|init> [options]
+const GlobalHelp = `usage: mdots <push|pull|init> [options]
 
 dotfilesをファイルコピー（非symlink）で管理するCLI。
 Store（mdots.toml を含む管理リポジトリのルート）の直下で実行する。mdots.toml はカレント直下のみ参照する。
@@ -27,7 +27,6 @@ Store（mdots.toml を含む管理リポジトリのルート）の直下で実�
 commands:
   push  Storeからdestへファイルをコピーする
   pull  destからStoreへファイルを回収する
-  diff  Storeとdestの差分を表示する
   init  Storeにmdots.toml雛形を作る
 
 global options:
@@ -59,17 +58,6 @@ options:
   -h, --help       使い方を表示する
 `
 
-const DiffHelp = `usage: mdots diff [--target <name>]
-
-Storeとdestの差分を diff -u 風に出力する。
-差分なしは無出力・exit 0、差分ありは差分を出力し exit 1。
---target 未指定時はcommonのみ、指定時は common + 指定Target が対象。
-
-options:
-  --target <name>  対象Target (例: win, wsl)。--target=<name> 形式も可
-  -h, --help       使い方を表示する
-`
-
 const InitHelp = `usage: mdots init
 
 Storeにmdots.toml雛形を作る。
@@ -80,12 +68,11 @@ options:
   -h, --help       使い方を表示する
 `
 
-// Executor は push/pull/diff/init の内部実行系への委譲口である。
+// Executor は push/pull/init の内部実行系への委譲口である。
 // 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
 type Executor interface {
 	Push(cwd, target string) error
 	Pull(cwd, target string) error
-	Diff(cwd, target string) (out string, hasDiff bool, err error)
 	PushDryRun(cwd, target string, stdout, stderr io.Writer) int
 	PullDryRun(cwd, target string, stdout, stderr io.Writer) int
 	Init(cwd string) error
@@ -116,7 +103,7 @@ func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writ
 
 	// 先頭トークンの事前振り分け。従来の自前解析は先頭トークンだけで
 	// help/version/unknown を確定させていたため、その優先順位を凍結値のまま保つ。
-	// push/pull/diff の詳細なフラグ解釈は宣言ツリーに任せる。
+	// push/pull の詳細なフラグ解釈は宣言ツリーに任せる。
 	if len(args) == 0 {
 		fmt.Fprint(stderr, GlobalHelp)
 		return 1
@@ -128,7 +115,7 @@ func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writ
 	case "--version", "-V", "version":
 		fmt.Fprintf(stdout, "mdots %s\n", version)
 		return 0
-	case "push", "pull", "diff", "init":
+	case "push", "pull", "init":
 		// 宣言ツリーへ進む。
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
@@ -156,8 +143,7 @@ func targetFlag() cliv3.Flag {
 	return &cliv3.StringFlag{Name: "target", Usage: "対象Target (例: win, wsl)。--target=<name> 形式も可"}
 }
 
-// dryRunFlag は --dry-run の宣言である。diff では定義した上で拒否し、
-// 凍結文面のエラーメッセージを保つ。
+// dryRunFlag は --dry-run の宣言である。
 func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Usage: "実際に書き込まず差分相当を出力する。差分ありは exit 1"}
 }
@@ -204,19 +190,6 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action:       r.pullAction,
 			},
 			{
-				Name:               "diff",
-				Usage:              "Storeとdestの差分を表示する",
-				CustomHelpTemplate: DiffHelp,
-				Flags: []cliv3.Flag{
-					targetFlag(),
-					// diff では --dry-run を拒否する。未定義にせず定義した上で
-					// 凍結文面で拒否することで、表面のエラーメッセージを保つ。
-					&cliv3.BoolFlag{Name: "dry-run", Usage: "push/pull のみで有効"},
-				},
-				OnUsageError: r.usageError(DiffHelp),
-				Action:       r.diffAction,
-			},
-			{
 				Name:               "init",
 				Usage:              "Storeにmdots.toml雛形を作る",
 				CustomHelpTemplate: InitHelp,
@@ -253,8 +226,7 @@ func (r *runner) rootAction(_ context.Context, cmd *cliv3.Command) error {
 
 // usageError はフラグ解釈失敗時（未知フラグ・--target の値不足）の表面を凍結値で出す。
 //
-// なお従来の自前解析との優先順位の違いは残る。--help と不正トークン
-// （diff での --dry-run を含む）の併用時はフレームワークの help 優先となり、
+// なお従来の自前解析との優先順位の違いは残る。--help と不正トークンの併用時はフレームワークの help 優先となり、
 // bare `--` はフラグ区切りとして扱う。いずれも exit 1 である点は従来通り。
 func (r *runner) usageError(commandHelp string) cliv3.OnUsageErrorFunc {
 	return func(_ context.Context, _ *cliv3.Command, err error, _ bool) error {
@@ -345,28 +317,6 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 	}
 	if err := r.exec.Pull(r.cwd, target); err != nil {
 		fmt.Fprintln(r.stderr, err)
-		return &exitError{code: 1}
-	}
-	return nil
-}
-
-func (r *runner) diffAction(_ context.Context, cmd *cliv3.Command) error {
-	target, err := r.targetArgs(cmd, DiffHelp)
-	if err != nil {
-		return err
-	}
-	if cmd.Bool("dry-run") {
-		fmt.Fprintln(r.stderr, "--dry-run is only supported for push/pull")
-		fmt.Fprint(r.stderr, DiffHelp)
-		return &exitError{code: 1}
-	}
-	out, hasDiff, err := r.exec.Diff(r.cwd, target)
-	if err != nil {
-		fmt.Fprintln(r.stderr, err)
-		return &exitError{code: 1}
-	}
-	if hasDiff {
-		fmt.Fprint(r.stdout, out)
 		return &exitError{code: 1}
 	}
 	return nil

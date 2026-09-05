@@ -20,11 +20,6 @@ type fakeExecutor struct {
 	pullCalls  int
 	pullErr    error
 
-	diffOut     string
-	diffHasDiff bool
-	diffErr     error
-	diffCalls   int
-
 	pushDryCode  int
 	pushDryOut   string
 	pushDryCalls int
@@ -47,11 +42,6 @@ func (f *fakeExecutor) Pull(cwd, target string) error {
 	f.pullCalls++
 	f.pullTarget = target
 	return f.pullErr
-}
-
-func (f *fakeExecutor) Diff(cwd, target string) (string, bool, error) {
-	f.diffCalls++
-	return f.diffOut, f.diffHasDiff, f.diffErr
 }
 
 func (f *fakeExecutor) PushDryRun(cwd, target string, stdout, stderr io.Writer) int {
@@ -87,7 +77,7 @@ func TestCliGlobalHelp(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		for _, want := range []string{"usage:", "push", "pull", "diff"} {
+		for _, want := range []string{"usage:", "push", "pull", "init"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
@@ -132,6 +122,17 @@ func TestCliUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestCliDiffIsRemoved(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, _, errOut := runCli(t, ex, []string{"diff"})
+	if code == 0 {
+		t.Fatal("Run(diff): exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "unknown command: diff") {
+		t.Errorf("stderr should contain unknown command: diff, got %q", errOut)
+	}
+}
+
 func TestCliCommandHelp(t *testing.T) {
 	tests := []struct {
 		args []string
@@ -140,7 +141,6 @@ func TestCliCommandHelp(t *testing.T) {
 		{[]string{"push", "--help"}, []string{"push", "--target", "--dry-run"}},
 		{[]string{"push", "-h"}, []string{"push", "--target", "--dry-run"}},
 		{[]string{"pull", "--help"}, []string{"pull", "--target", "--dry-run"}},
-		{[]string{"diff", "--help"}, []string{"diff", "--target"}},
 	}
 	for _, tt := range tests {
 		ex := &fakeExecutor{}
@@ -192,25 +192,11 @@ func TestCliTargetFlagErrors(t *testing.T) {
 		{"pull", "--target"},
 		{"pull", "--target="},
 		{"pull", "--unknown"},
-		{"diff", "--target"},
-		{"diff", "--target="},
-		{"diff", "--unknown"},
 	} {
 		ex := &fakeExecutor{}
 		if code, _, _ := runCli(t, ex, args); code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
-	}
-}
-
-func TestCliDiffRejectsDryRun(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, _, errOut := runCli(t, ex, []string{"diff", "--dry-run"})
-	if code == 0 {
-		t.Fatal("Run(diff --dry-run): exit = 0, want non-zero")
-	}
-	if !strings.Contains(errOut, "--dry-run is only supported for push/pull") {
-		t.Errorf("stderr should contain dry-run rejection, got %q", errOut)
 	}
 }
 
@@ -241,22 +227,6 @@ func TestCliPullDryRunDelegatesExitCode(t *testing.T) {
 	ex = &fakeExecutor{pullDryCode: 0}
 	if code, _, _ := runCli(t, ex, []string{"pull", "--dry-run"}); code != 0 {
 		t.Errorf("Run(pull --dry-run) without changes: exit = %d, want 0", code)
-	}
-}
-
-func TestCliDiffExitCode(t *testing.T) {
-	ex := &fakeExecutor{diffOut: "--- a\n+++ b\n", diffHasDiff: true}
-	code, out, _ := runCli(t, ex, []string{"diff"})
-	if code != 1 {
-		t.Errorf("Run(diff) with changes: exit = %d, want 1", code)
-	}
-	if !strings.Contains(out, "---") {
-		t.Errorf("output should contain diff, got %q", out)
-	}
-
-	ex = &fakeExecutor{}
-	if code, _, _ := runCli(t, ex, []string{"diff"}); code != 0 {
-		t.Errorf("Run(diff) without changes: exit = %d, want 0", code)
 	}
 }
 

@@ -28,37 +28,24 @@ func Push(storeRoot string, entries []config.Entry) error {
 	return nil
 }
 
-// Diff は Store の src と dest の差分を diff -u 風の文字列で返す。
-// 差分がない Entry は出力に含めない。差分が1件でもあれば hasDiff=true。
-// src/dest が不在・ディレクトリの場合はエラーで中断する。
-// 実体は単一の差分コア（欠落時ポリシーのみ引数化）への薄い委譲である。
-func Diff(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
-	return diffCore(storeRoot, entries, policyStrict)
-}
-
 // missingPolicy は差分コアにおける欠落時の扱いを表す。
 // 出力・exitの振る舞いは変えず、欠落時ポリシーの違いのみを引数化する。
 type missingPolicy int
 
 const (
-	// policyStrict は Diff 用：src/dest のいずれの欠落もエラーにする。
-	policyStrict missingPolicy = iota
 	// policyPushDryRun は push の dry-run 用：dest 不在を新規作成予定として報告する。
-	policyPushDryRun
+	policyPushDryRun missingPolicy = iota
 	// policyPullDryRun は pull の dry-run 用：Store の src 不在を新規回収予定として報告する。
 	policyPullDryRun
 )
 
 // opLabel は差分コアのエラー接頭辞をポリシーから導く。
-// 従来の Diff/dry-run の文面をそのまま保つ。
 func (p missingPolicy) opLabel() string {
 	switch p {
 	case policyPushDryRun:
 		return "dry-run push"
-	case policyPullDryRun:
-		return "dry-run pull"
 	default:
-		return "diff"
+		return "dry-run pull"
 	}
 }
 
@@ -69,7 +56,7 @@ func writeNewFileNotice(sb *strings.Builder, srcLabel, destLabel, body string) {
 	sb.WriteString(body)
 }
 
-// diffCore は dry-run 系と Diff の単一の差分コアである。
+// diffCore は dry-run 系の単一の差分コアである。
 // 両方存在する Entry は unified diff を出し、不在の扱いだけを policy で切り替える。
 // 自前の unified diff 実装・出力文面・exitの対応（hasDiff）は変えない。
 func diffCore(storeRoot string, entries []config.Entry, policy missingPolicy) (string, bool, error) {
@@ -120,19 +107,6 @@ func diffCore(storeRoot string, entries []config.Entry, policy missingPolicy) (s
 			}
 			if srcInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: Store src is a directory: %s", op, e.Src, srcPath)
-			}
-		default:
-			if srcErr != nil {
-				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
-			}
-			if srcInfo.IsDir() {
-				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
-			}
-			if destErr != nil {
-				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, destErr)
-			}
-			if destInfo.IsDir() {
-				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 			}
 		}
 		d, same, err := diffContent(srcPath, destPath, e.Src, e.Dest)
@@ -227,7 +201,7 @@ func unifiedBody(srcLines, destLines []string) string {
 }
 
 // DryRunPush は push の差分相当を返す。実際の書き込みは行わない。
-// 両方存在する Entry は Diff と同じ unified diff を出し、
+// 両方存在する Entry は unified diff を出し、
 // dest 不在の Entry は新規作成予定として報告する。
 // src 不在・ディレクトリは push と同様にエラーで中断する。
 // 実体は単一の差分コアへの薄い委譲である。
@@ -236,7 +210,7 @@ func DryRunPush(storeRoot string, entries []config.Entry) (output string, hasDif
 }
 
 // DryRunPull は pull の差分相当を返す。実際の書き込みは行わない。
-// 両方存在する Entry は Diff と同じ unified diff を出し、
+// 両方存在する Entry は unified diff を出し、
 // Store の src 不在の Entry は新規回収予定として報告する。
 // dest 不在・ディレクトリは pull と同様にエラーで中断する。
 // 実体は単一の差分コアへの薄い委譲である。
