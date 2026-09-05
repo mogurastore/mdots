@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mogurastore/mdots/config"
 	"github.com/mogurastore/mdots/sync"
@@ -18,20 +19,57 @@ func main() {
 	os.Exit(run(os.Args[1:], cwd))
 }
 
+const pushUsage = "usage: mdots push [--target <name>]"
+
 func run(args []string, cwd string) int {
-	if len(args) != 1 || args[0] != "push" {
-		fmt.Fprintln(os.Stderr, "usage: mdots push")
+	if len(args) == 0 || args[0] != "push" {
+		fmt.Fprintln(os.Stderr, pushUsage)
 		return 1
 	}
-	if err := runPush(cwd); err != nil {
+	target, err := parsePushArgs(args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, pushUsage)
+		return 1
+	}
+	if err := runPush(cwd, target); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 
-// runPush は common の Entry のみを Store から dest へコピーする。
-func runPush(cwd string) error {
+// parsePushArgs は push の --target フラグを解釈する。
+// `--target <name>` と `--target=<name>` を受け付ける。
+func parsePushArgs(args []string) (string, error) {
+	var target string
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--target":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("missing value for --target")
+			}
+			target = args[i+1]
+			i++
+			seen = true
+		case strings.HasPrefix(a, "--target="):
+			target = strings.TrimPrefix(a, "--target=")
+			seen = true
+		default:
+			return "", fmt.Errorf("unknown argument: %s", a)
+		}
+	}
+	if seen && target == "" {
+		return "", fmt.Errorf("missing value for --target")
+	}
+	return target, nil
+}
+
+// runPush は common + 指定Target の Entry を Store から dest へコピーする。
+// target 未指定時は common のみが対象になる。
+func runPush(cwd string, target string) error {
 	store, err := config.FindStore(cwd)
 	if err != nil {
 		return err
@@ -40,6 +78,6 @@ func runPush(cwd string) error {
 	if err != nil {
 		return err
 	}
-	entries := config.FilterByTarget(cfg.Entries, "")
+	entries := config.FilterByTarget(cfg.Entries, target)
 	return sync.Push(store, entries)
 }
