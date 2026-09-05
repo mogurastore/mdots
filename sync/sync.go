@@ -143,6 +143,85 @@ func unifiedBody(srcLines, destLines []string) string {
 	return sb.String()
 }
 
+// DryRunPush は push の差分相当を返す。実際の書き込みは行わない。
+// 両方存在する Entry は Diff と同じ unified diff を出し、
+// dest 不在の Entry は新規作成予定として報告する。
+// src 不在・ディレクトリは push と同様にエラーで中断する。
+func DryRunPush(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
+	return dryRun(storeRoot, entries, "push")
+}
+
+// DryRunPull は pull の差分相当を返す。実際の書き込みは行わない。
+// 両方存在する Entry は Diff と同じ unified diff を出し、
+// Store の src 不在の Entry は新規回収予定として報告する。
+// dest 不在・ディレクトリは pull と同様にエラーで中断する。
+func DryRunPull(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
+	return dryRun(storeRoot, entries, "pull")
+}
+
+// dryRun は direction ("push"/"pull") に応じた欠落時の扱いで差分相当を作る。
+func dryRun(storeRoot string, entries []config.Entry, direction string) (string, bool, error) {
+	var sb strings.Builder
+	hasDiff := false
+	for _, e := range entries {
+		destPath, err := config.ExpandDest(e.Dest)
+		if err != nil {
+			return "", false, fmt.Errorf("dry-run %s %s: dest expand: %w", direction, e.Src, err)
+		}
+		srcPath := filepath.Join(storeRoot, e.Src)
+		if direction == "push" {
+			srcInfo, err := os.Stat(srcPath)
+			if err != nil {
+				return "", false, fmt.Errorf("dry-run push %s: %w", e.Src, err)
+			}
+			if srcInfo.IsDir() {
+				return "", false, fmt.Errorf("dry-run push %s: src is a directory: %s", e.Src, srcPath)
+			}
+			if destInfo, err := os.Stat(destPath); err != nil {
+				if !os.IsNotExist(err) {
+					return "", false, fmt.Errorf("dry-run push %s: %w", e.Src, err)
+				}
+				sb.WriteString("--- " + e.Src + "\n")
+				sb.WriteString("+++ " + e.Dest + "\n")
+				sb.WriteString("(new file: " + e.Dest + " would be created)\n")
+				hasDiff = true
+				continue
+			} else if destInfo.IsDir() {
+				return "", false, fmt.Errorf("dry-run push %s: dest is a directory: %s", e.Src, destPath)
+			}
+		} else {
+			destInfo, err := os.Stat(destPath)
+			if err != nil {
+				return "", false, fmt.Errorf("dry-run pull %s: %w", e.Src, err)
+			}
+			if destInfo.IsDir() {
+				return "", false, fmt.Errorf("dry-run pull %s: dest is a directory: %s", e.Src, destPath)
+			}
+			if srcInfo, err := os.Stat(srcPath); err != nil {
+				if !os.IsNotExist(err) {
+					return "", false, fmt.Errorf("dry-run pull %s: %w", e.Src, err)
+				}
+				sb.WriteString("--- " + e.Src + "\n")
+				sb.WriteString("+++ " + e.Dest + "\n")
+				sb.WriteString("(new file: " + e.Src + " would be created in Store)\n")
+				hasDiff = true
+				continue
+			} else if srcInfo.IsDir() {
+				return "", false, fmt.Errorf("dry-run pull %s: Store src is a directory: %s", e.Src, srcPath)
+			}
+		}
+		d, same, err := diffFile(srcPath, destPath, e.Src, e.Dest)
+		if err != nil {
+			return "", false, fmt.Errorf("dry-run %s %s: %w", direction, e.Src, err)
+		}
+		if !same {
+			sb.WriteString(d)
+			hasDiff = true
+		}
+	}
+	return sb.String(), hasDiff, nil
+}
+
 // Pull は dest を Store の src へファイルコピーする。
 // Entry の src は Store 相対、dest は ~ 展開される配置先パス。
 // Push と同じく親ディレクトリは mkdir -p、パーミッションは元ファイルに追従、上書きは無確認。
