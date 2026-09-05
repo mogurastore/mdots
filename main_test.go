@@ -168,6 +168,126 @@ func TestPushTargetFlagErrors(t *testing.T) {
 	}
 }
 
+// Seam: CLIコマンド境界 (mdots pull)
+// 実FS上の Store/dest を用い、end-to-end の外部挙動のみを検証する。
+func TestPullEndToEnd(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"pull"}, store); code != 0 {
+		t.Fatalf("run(pull) exit = %d, want 0", code)
+	}
+	got, err := os.ReadFile(filepath.Join(store, "vimrc"))
+	if err != nil {
+		t.Fatalf("store read error: %v", err)
+	}
+	if string(got) != "edited\n" {
+		t.Errorf("store content = %q, want %q", got, "edited\n")
+	}
+}
+
+func TestPullWithTargetFiltersCommonPlusTarget(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.WriteFile(filepath.Join(home, ".common.conf"), []byte("common edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".win.conf"), []byte("win edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".wsl.conf"), []byte("wsl edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n" +
+		"  - src: common.conf\n    dest: ~/.common.conf\n" +
+		"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n" +
+		"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"pull", "--target", "win"}, store); code != 0 {
+		t.Fatalf("run(pull --target win) exit = %d, want 0", code)
+	}
+	if got, err := os.ReadFile(filepath.Join(store, "common.conf")); err != nil || string(got) != "common edited\n" {
+		t.Errorf("common should be pulled: content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(store, "win.conf")); err != nil || string(got) != "win edited\n" {
+		t.Errorf("win should be pulled: content=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "wsl.conf")); err == nil {
+		t.Error("wsl should NOT be pulled with --target win")
+	}
+}
+
+func TestPullMissingDestIsError(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"pull"}, store); code == 0 {
+		t.Error("run(pull) with missing dest: exit = 0, want non-zero")
+	}
+}
+
+func TestPullDestDirIsError(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n  - src: config\n    dest: ~/.config\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"pull"}, store); code == 0 {
+		t.Error("run(pull) with dir dest: exit = 0, want non-zero")
+	}
+}
+
+func TestPullWithoutStoreFails(t *testing.T) {
+	empty := t.TempDir()
+	if code := run([]string{"pull"}, empty); code == 0 {
+		t.Error("run(pull) without Store: exit = 0, want non-zero")
+	}
+}
+
+func TestPullTargetFlagErrors(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"pull", "--target"},
+		{"pull", "--target="},
+		{"pull", "--unknown"},
+	} {
+		if code := run(args, store); code == 0 {
+			t.Errorf("run(%v): exit = 0, want non-zero", args)
+		}
+	}
+}
+
 func TestPushWithoutStoreFails(t *testing.T) {
 	empty := t.TempDir()
 	if code := run([]string{"push"}, empty); code == 0 {
