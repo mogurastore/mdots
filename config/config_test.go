@@ -46,9 +46,9 @@ func TestFilterByTarget(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (Store の mdots.toml 読込・validation)
-// Entry の src/dest 必須と target の string | string[] を外部挙動で検証する。
+// Entry の src/dest 必須と target の string[] を外部挙動で検証する。
 func TestLoadStoreConfig(t *testing.T) {
-	t.Run("stringと配列のTargetを読み込める", func(t *testing.T) {
+	t.Run("配列のTargetを読み込める", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "mdots.toml")
 		body := "[[entries]]\n" +
@@ -58,7 +58,7 @@ func TestLoadStoreConfig(t *testing.T) {
 			"[[entries]]\n" +
 			"src = \"wezterm.lua\"\n" +
 			"dest = \"~/.config/wezterm/wezterm.lua\"\n" +
-			"target = \"win\"\n" +
+			"target = [\"win\"]\n" +
 			"\n" +
 			"[[entries]]\n" +
 			"src = \"shared.conf\"\n" +
@@ -68,7 +68,7 @@ func TestLoadStoreConfig(t *testing.T) {
 			"[[entries]]\n" +
 			"src = \"common.conf\"\n" +
 			"dest = \"~/.config/common.conf\"\n" +
-			"target = \"common\"\n"
+			"target = [\"common\"]\n"
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -93,6 +93,7 @@ func TestLoadStoreConfig(t *testing.T) {
 			"src欠落":     "[[entries]]\ndest = \"~/.a\"\n",
 			"dest欠落":    "[[entries]]\nsrc = \"a\"\n",
 			"target型不正": "[[entries]]\nsrc = \"a\"\ndest = \"~/.a\"\ntarget = 123\n",
+			"target文字列は不正": "[[entries]]\nsrc = \"a\"\ndest = \"~/.a\"\ntarget = \"win\"\n",
 		}
 		for name, body := range cases {
 			p := filepath.Join(dir, "mdots.toml")

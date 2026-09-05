@@ -16,31 +16,29 @@ type Config struct {
 
 // Entry は1つの管理対象を表す src/dest ペア。
 // src は Store 相対のファイルパス、dest は ~ 展開される配置先パス。
-// Target は適用先を識別する自由文字列。省略時は common として扱う。
+// Target は適用先を識別する自由文字列の配列。省略時は common として扱う。
+// 単一指定も1要素配列で書く（例: ["win"]）。
 type Entry struct {
 	Src    string     `toml:"src"`
 	Dest   string     `toml:"dest"`
 	Target TargetList `toml:"target,omitempty"`
 }
 
-// TargetList は string | string[] を受け付ける Target の集合。
+// TargetList は string[] を受け付ける Target の集合。
 type TargetList []string
 
-// UnmarshalTOML は string | string[] の両方を受け付ける。
+// UnmarshalTOML は string[] のみを受け付ける。単一指定は1要素配列で書く。
 func (t *TargetList) UnmarshalTOML(value interface{}) error {
 	switch v := value.(type) {
 	case nil:
 		*t = nil
-		return nil
-	case string:
-		*t = TargetList{v}
 		return nil
 	case []interface{}:
 		out := make(TargetList, 0, len(v))
 		for _, item := range v {
 			s, ok := item.(string)
 			if !ok {
-				return fmt.Errorf("target must be string or string[]")
+				return fmt.Errorf("target must be string[]")
 			}
 			out = append(out, s)
 		}
@@ -50,7 +48,7 @@ func (t *TargetList) UnmarshalTOML(value interface{}) error {
 		*t = TargetList(v)
 		return nil
 	default:
-		return fmt.Errorf("target must be string or string[]")
+		return fmt.Errorf("target must be string[]")
 	}
 }
 
@@ -166,7 +164,7 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 # Entry（1つの管理対象）:
 #   src    = Store相対のファイルパス
 #   dest   = 配置先パス（~ / ~/... はホームに展開）
-#   target = 省略時 common。--target 未指定時は common のみ、指定時は common + 指定Target が対象
+#   target = 配列で指定（省略時 common）。単一も ["win"] のように書く。--target 未指定時は common のみ、指定時は common + 指定Target が対象
 #
 # コメントを外して使う。まず common の1件から始めるのがおすすめ。
 #
@@ -177,7 +175,7 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 # [[entries]]
 # src = "wezterm.lua"
 # dest = "~/.config/wezterm/wezterm.lua"
-# target = "win"
+# target = ["win"]
 #
 # [[entries]]
 # src = "shared.conf"
