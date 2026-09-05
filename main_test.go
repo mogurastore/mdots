@@ -3,24 +3,43 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// Seam: CLIコマンド境界 (mdots push)
-// 実FS上の Store/dest を用い、end-to-end の外部挙動のみを検証する。
-func TestPushEndToEnd(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
+// setupStoreWithHome は Store 準備・HOME 隔離の定型を集約する。
+// storeFiles は Store 直下に作るファイル群、homeFiles は HOME 直下に作る
+// ファイル群、yaml は mdots.yaml の本文。HOME は t.Setenv で隔離する。
+func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, yaml string) (store, home string) {
+	t.Helper()
+	store = t.TempDir()
+	home = t.TempDir()
 	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for name, body := range storeFiles {
+		if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
+	for name, body := range homeFiles {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return store, home
+}
+
+// Seam: CLIコマンド境界 (mdots push/pull/diff の代表例)
+// 実FS上の Store/dest を用い、run 経由の外部挙動のみを検証する。
+// Target 展開・フラグ解釈・差分詳細は CLI・設定・同期の各境界テストに寄せ、
+// ここでは配線の代表例だけを残す。
+func TestPushEndToEnd(t *testing.T) {
+	store, home := setupStoreWithHome(t,
+		map[string]string{"vimrc": "set number\n"},
+		nil,
+		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+	)
 
 	if code := run([]string{"push"}, store); code != 0 {
 		t.Fatalf("run(push) exit = %d, want 0", code)
@@ -34,18 +53,40 @@ func TestPushEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPushFromSubdirFails(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// Target 配線の代表例。展開パターン自体は設定境界テストが保証する。
+func TestPushWithTargetRepresentative(t *testing.T) {
+	store, home := setupStoreWithHome(t,
+		map[string]string{
+			"common.conf": "common\n",
+			"win.conf":    "win\n",
+			"wsl.conf":    "wsl\n",
+		},
+		nil,
+		"entries:\n"+
+			"  - src: common.conf\n    dest: ~/.common.conf\n"+
+			"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n"+
+			"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n",
+	)
 
-	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if code := run([]string{"push", "--target", "win"}, store); code != 0 {
+		t.Fatalf("run(push --target win) exit = %d, want 0", code)
 	}
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
+	for _, f := range []string{".common.conf", ".win.conf"} {
+		if _, err := os.Stat(filepath.Join(home, f)); err != nil {
+			t.Errorf("%s should be copied: %v", f, err)
+		}
 	}
+	if _, err := os.Stat(filepath.Join(home, ".wsl.conf")); err == nil {
+		t.Error(".wsl.conf should NOT be copied with --target win")
+	}
+}
+
+func TestPushFromSubdirFails(t *testing.T) {
+	store, home := setupStoreWithHome(t,
+		map[string]string{"vimrc": "x\n"},
+		nil,
+		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+	)
 	sub := filepath.Join(store, "a", "b")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -59,130 +100,12 @@ func TestPushFromSubdirFails(t *testing.T) {
 	}
 }
 
-func TestPushOnlyCommonEntries(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(store, "common.conf"), []byte("common\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store, "win.conf"), []byte("win\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n" +
-		"  - src: common.conf\n    dest: ~/.common.conf\n" +
-		"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := run([]string{"push"}, store); code != 0 {
-		t.Fatalf("run(push) exit = %d, want 0", code)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".common.conf")); err != nil {
-		t.Errorf("common Entry should be copied: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".win.conf")); err == nil {
-		t.Error("win Entry should NOT be copied without --target")
-	}
-}
-
-func TestPushWithTarget(t *testing.T) {
-	setup := func(t *testing.T) (store, home string) {
-		t.Helper()
-		store = t.TempDir()
-		home = t.TempDir()
-		t.Setenv("HOME", home)
-
-		files := map[string]string{
-			"common.conf":  "common\n",
-			"explicit.conf": "explicit\n",
-			"win.conf":     "win\n",
-			"multi.conf":   "multi\n",
-			"wsl.conf":     "wsl\n",
-		}
-		for name, body := range files {
-			if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		yaml := "entries:\n" +
-			"  - src: common.conf\n    dest: ~/.common.conf\n" +
-			"  - src: explicit.conf\n    dest: ~/.explicit.conf\n    target: common\n" +
-			"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n" +
-			"  - src: multi.conf\n    dest: ~/.multi.conf\n    target: [win, wsl]\n" +
-			"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n"
-		if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return store, home
-	}
-
-	tests := []struct {
-		name string
-		args []string
-		want []string
-		not  []string
-	}{
-		{"winはcommon+win", []string{"push", "--target", "win"}, []string{".common.conf", ".explicit.conf", ".win.conf", ".multi.conf"}, []string{".wsl.conf"}},
-		{"wslはcommon+wsl(配列一致含む)", []string{"push", "--target", "wsl"}, []string{".common.conf", ".explicit.conf", ".multi.conf", ".wsl.conf"}, []string{".win.conf"}},
-		{"未知Targetはcommonのみ", []string{"push", "--target", "linux"}, []string{".common.conf", ".explicit.conf"}, []string{".win.conf", ".multi.conf", ".wsl.conf"}},
-		{"target=形式も受付", []string{"push", "--target=win"}, []string{".common.conf", ".explicit.conf", ".win.conf", ".multi.conf"}, []string{".wsl.conf"}},
-		{"target commonはcommonのみと同等", []string{"push", "--target", "common"}, []string{".common.conf", ".explicit.conf"}, []string{".win.conf", ".multi.conf", ".wsl.conf"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store, home := setup(t)
-			if code := run(tt.args, store); code != 0 {
-				t.Fatalf("run(%v) exit = %d, want 0", tt.args, code)
-			}
-			for _, f := range tt.want {
-				if _, err := os.Stat(filepath.Join(home, f)); err != nil {
-					t.Errorf("%s should be copied: %v", f, err)
-				}
-			}
-			for _, f := range tt.not {
-				if _, err := os.Stat(filepath.Join(home, f)); err == nil {
-					t.Errorf("%s should NOT be copied with %v", f, tt.args)
-				}
-			}
-		})
-	}
-}
-
-func TestPushTargetFlagErrors(t *testing.T) {
-	store := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"push", "--target"},
-		{"push", "--target="},
-		{"push", "--unknown"},
-	} {
-		if code := run(args, store); code == 0 {
-			t.Errorf("run(%v): exit = 0, want non-zero", args)
-		}
-	}
-}
-
-// Seam: CLIコマンド境界 (mdots pull)
-// 実FS上の Store/dest を用い、end-to-end の外部挙動のみを検証する。
 func TestPullEndToEnd(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("edited\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "edited\n"},
+		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+	)
 
 	if code := run([]string{"pull"}, store); code != 0 {
 		t.Fatalf("run(pull) exit = %d, want 0", code)
@@ -196,245 +119,49 @@ func TestPullEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPullWithTargetFiltersCommonPlusTarget(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(home, ".common.conf"), []byte("common edited\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".win.conf"), []byte("win edited\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".wsl.conf"), []byte("wsl edited\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n" +
-		"  - src: common.conf\n    dest: ~/.common.conf\n" +
-		"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n" +
-		"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := run([]string{"pull", "--target", "win"}, store); code != 0 {
-		t.Fatalf("run(pull --target win) exit = %d, want 0", code)
-	}
-	if got, err := os.ReadFile(filepath.Join(store, "common.conf")); err != nil || string(got) != "common edited\n" {
-		t.Errorf("common should be pulled: content=%q err=%v", got, err)
-	}
-	if got, err := os.ReadFile(filepath.Join(store, "win.conf")); err != nil || string(got) != "win edited\n" {
-		t.Errorf("win should be pulled: content=%q err=%v", got, err)
-	}
-	if _, err := os.Stat(filepath.Join(store, "wsl.conf")); err == nil {
-		t.Error("wsl should NOT be pulled with --target win")
-	}
-}
-
+// 同期系エラーの exit 伝播の代表例。欠落・種別の網羅は同期境界テストが保証する。
 func TestPullMissingDestIsError(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	store, _ := setupStoreWithHome(t,
+		nil,
+		nil,
+		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+	)
 
 	if code := run([]string{"pull"}, store); code == 0 {
 		t.Error("run(pull) with missing dest: exit = 0, want non-zero")
 	}
 }
 
-func TestPullDestDirIsError(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n  - src: config\n    dest: ~/.config\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := run([]string{"pull"}, store); code == 0 {
-		t.Error("run(pull) with dir dest: exit = 0, want non-zero")
-	}
-}
-
-func TestPullWithoutStoreFails(t *testing.T) {
-	empty := t.TempDir()
-	if code := run([]string{"pull"}, empty); code == 0 {
-		t.Error("run(pull) without Store: exit = 0, want non-zero")
-	}
-}
-
-func TestPullTargetFlagErrors(t *testing.T) {
-	store := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"pull", "--target"},
-		{"pull", "--target="},
-		{"pull", "--unknown"},
-	} {
-		if code := run(args, store); code == 0 {
-			t.Errorf("run(%v): exit = 0, want non-zero", args)
+func TestDiffExitCodes(t *testing.T) {
+	t.Run("差分なしはexit 0", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "set number\n"},
+			map[string]string{".vimrc": "set number\n"},
+			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		)
+		if code := run([]string{"diff"}, store); code != 0 {
+			t.Errorf("run(diff) without changes: exit = %d, want 0", code)
 		}
-	}
+	})
+
+	t.Run("差分ありはexit非ゼロ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "set number\n"},
+			map[string]string{".vimrc": "set nonumber\n"},
+			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		)
+		if code := run([]string{"diff"}, store); code == 0 {
+			t.Error("run(diff) with changes: exit = 0, want non-zero")
+		}
+	})
 }
 
-func TestPushWithoutStoreFails(t *testing.T) {
+// Store 未発見時の失敗は3コマンド共通。文言自体は設定境界テストが保証する。
+func TestCommandsWithoutStoreFail(t *testing.T) {
 	empty := t.TempDir()
-	if code := run([]string{"push"}, empty); code == 0 {
-		t.Error("run(push) without Store: exit = 0, want non-zero")
-	}
-}
-
-// Seam: CLIコマンド境界 (mdots diff)
-// 実FS上の Store/dest を用い、end-to-end の外部挙動のみを検証する。
-func TestDiffNoDiffExitsZero(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := run([]string{"diff"}, store); code != 0 {
-		t.Errorf("run(diff) without changes: exit = %d, want 0", code)
-	}
-	out, hasDiff, err := runDiff(store, "")
-	if err != nil {
-		t.Fatalf("runDiff error: %v", err)
-	}
-	if hasDiff {
-		t.Error("hasDiff = true, want false")
-	}
-	if out != "" {
-		t.Errorf("output = %q, want empty", out)
-	}
-}
-
-func TestDiffShowsDiffAndExitsNonZero(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("set nonumber\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if code := run([]string{"diff"}, store); code == 0 {
-		t.Error("run(diff) with changes: exit = 0, want non-zero")
-	}
-	out, hasDiff, err := runDiff(store, "")
-	if err != nil {
-		t.Fatalf("runDiff error: %v", err)
-	}
-	if !hasDiff {
-		t.Fatal("hasDiff = false, want true")
-	}
-	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
-		t.Errorf("output should contain ---/+++, got %q", out)
-	}
-}
-
-func TestDiffWithTargetFiltersCommonPlusTarget(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	// common は同一、win のみ差分あり、wsl は差分あっても対象外であるべき。
-	if err := os.WriteFile(filepath.Join(store, "common.conf"), []byte("common\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".common.conf"), []byte("common\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store, "win.conf"), []byte("win old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".win.conf"), []byte("win new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store, "wsl.conf"), []byte("wsl old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".wsl.conf"), []byte("wsl new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "entries:\n" +
-		"  - src: common.conf\n    dest: ~/.common.conf\n" +
-		"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n" +
-		"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n"
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out, hasDiff, err := runDiff(store, "win")
-	if err != nil {
-		t.Fatalf("runDiff error: %v", err)
-	}
-	if !hasDiff {
-		t.Fatal("hasDiff = false, want true (win differs)")
-	}
-	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
-		t.Errorf("output should contain ---/+++, got %q", out)
-	}
-	if strings.Contains(out, "wsl.conf") {
-		t.Errorf("output should NOT contain wsl Entry with --target win, got %q", out)
-	}
-
-	// CLI フラグ経路も検証する: win 差分ありは exit 非ゼロ、対象外のみの差分は exit 0。
-	if code := run([]string{"diff", "--target", "win"}, store); code == 0 {
-		t.Error("run(diff --target win) with win changes: exit = 0, want non-zero")
-	}
-	if code := run([]string{"diff", "--target", "linux"}, store); code != 0 {
-		t.Errorf("run(diff --target linux) without applicable changes: exit = %d, want 0", code)
-	}
-}
-
-func TestDiffWithoutStoreFails(t *testing.T) {
-	empty := t.TempDir()
-	if code := run([]string{"diff"}, empty); code == 0 {
-		t.Error("run(diff) without Store: exit = 0, want non-zero")
-	}
-}
-
-func TestDiffTargetFlagErrors(t *testing.T) {
-	store := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"diff", "--target"},
-		{"diff", "--target="},
-		{"diff", "--unknown"},
-	} {
-		if code := run(args, store); code == 0 {
-			t.Errorf("run(%v): exit = 0, want non-zero", args)
+	for _, args := range [][]string{{"push"}, {"pull"}, {"diff"}} {
+		if code := run(args, empty); code == 0 {
+			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
 		}
 	}
 }
