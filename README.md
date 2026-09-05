@@ -1,0 +1,68 @@
+# mdots
+
+dotfilesをファイルコピー（非symlink）で管理するCLI。
+Store（`mdots.yaml` を含む管理リポジトリのルート）とホーム側を `push` / `pull` / `diff` で同期する。
+
+## 導入
+
+いずれかの方法で導入できる。
+
+```sh
+# go install
+go install github.com/mogurastore/mdots@latest
+
+# mise (ubi バックエンド)
+mise use ubi:mogurastore/mdots@latest
+
+# GitHub Releases からバイナリを取得
+# https://github.com/mogurastore/mdots/releases から OS/Arch に合う
+# mdots-<version>-<os>-<arch>.tar.gz (Windows は .zip) を展開する
+```
+
+## 最小サンプル
+
+Store（管理リポジトリ）の直下に `mdots.yaml` を置く。
+`src` は Store 相対のファイルパス、`dest` は `~` 展開される配置先パス、
+`target` は省略時 common 扱いの自由文字列（例: `win`, `wsl`）。
+
+```yaml
+# <Store>/mdots.yaml
+entries:
+  - src: vimrc
+    dest: ~/.vimrc
+  - src: wezterm.lua
+    dest: ~/.config/wezterm/wezterm.lua
+    target: win
+  - src: shared.conf
+    dest: ~/.config/shared.conf
+    target: [win, wsl]
+```
+
+```sh
+mdots push              # common のみを Store から dest へコピー
+mdots push --target win # common + win を対象にする
+mdots pull --target win # dest から Store へ回収する
+mdots diff              # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
+```
+
+## 使い方
+
+```sh
+mdots --help            # 使い方を表示する
+mdots push --help       # コマンド別の使い方を表示する
+mdots --version         # バージョンを表示する（ldflags -X main.version で埋め込み）
+```
+
+> 補足: `go install @latest` で導入した場合はバージョンが `mdots dev` と表示される。
+> タグ付きバージョンは GitHub Releases のバイナリでのみ埋め込まれる。
+
+| コマンド | 意味 |
+| --- | --- |
+| `push [--target <name>] [--dry-run]` | Store から dest へコピーする |
+| `pull [--target <name>] [--dry-run]` | dest から Store へ回収する |
+| `diff [--target <name>]` | Store と dest の差分を表示する |
+
+- `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。
+- `--dry-run` は実際に書き込まず差分相当を出力する。差分ありは exit 1、差分なしは exit 0。
+- `mdots.yaml` が見つからないときは `mdots.yaml not found: searched from <cwd> to /` と表示し exit 1 になる。
+- Store はカレントから親方向に `mdots.yaml` を探索して発見する。サブディレクトリからでも実行できる。

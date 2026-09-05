@@ -4,3 +4,6 @@ apm_modules/
 
 # opencode local config (per-user)
 opencode.json
+
+# GoReleaser
+dist/
