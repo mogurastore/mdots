@@ -66,24 +66,26 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	return store, config.FilterByTarget(cfg.Entries, target), nil
 }
 
-// runPush は common + 指定Target の Entry を Store から dest へコピーする。
-// target 未指定時は common のみが対象になる。
-func runPush(cwd string, target string) error {
+// runCopy は push/pull のコピー系の共有本体である。方向の違いは copyFn に寄せ、
+// 各 action（runPush/runPull）は薄い委譲に留める。
+func runCopy(cwd string, target string, copyFn func(string, []config.Entry) error) error {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		return err
 	}
-	return sync.Push(store, entries)
+	return copyFn(store, entries)
+}
+
+// runPush は common + 指定Target の Entry を Store から dest へコピーする。
+// target 未指定時は common のみが対象になる。
+func runPush(cwd string, target string) error {
+	return runCopy(cwd, target, sync.Push)
 }
 
 // runPull は common + 指定Target の Entry を dest から Store へ回収する。
 // target 未指定時は common のみが対象になる。
 func runPull(cwd string, target string) error {
-	store, entries, err := resolveEntries(cwd, target)
-	if err != nil {
-		return err
-	}
-	return sync.Pull(store, entries)
+	return runCopy(cwd, target, sync.Pull)
 }
 
 // runDiff は common + 指定Target の Entry について Store/src と dest の
@@ -97,19 +99,8 @@ func runDiff(cwd string, target string) (string, bool, error) {
 	return sync.Diff(store, entries)
 }
 
-// runPushDryRun は push の差分相当を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
-func runPushDryRun(cwd string, target string, stdout, stderr io.Writer) int {
-	store, entries, err := resolveEntries(cwd, target)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	out, hasDiff, err := sync.DryRunPush(store, entries)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
+// emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは 0。
+func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 	if hasDiff {
 		fmt.Fprint(stdout, out)
 		return 1
@@ -117,22 +108,30 @@ func runPushDryRun(cwd string, target string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runPullDryRun は pull の差分相当を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
-func runPullDryRun(cwd string, target string, stdout, stderr io.Writer) int {
+// runDryRun は dry-run 系の共有本体である。欠落時ポリシーの違いは diffFn に寄せ、
+// pushかpullかの分岐は各 action（runPushDryRun/runPullDryRun）の呼び出し側に残す。
+func runDryRun(cwd string, target string, stdout, stderr io.Writer, diffFn func(string, []config.Entry) (string, bool, error)) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	out, hasDiff, err := sync.DryRunPull(store, entries)
+	out, hasDiff, err := diffFn(store, entries)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if hasDiff {
-		fmt.Fprint(stdout, out)
-		return 1
-	}
-	return 0
+	return emitDiff(stdout, out, hasDiff)
+}
+
+// runPushDryRun は push の差分相当を stdout に出し、書き込みは行わない。
+// 差分ありは exit 1、差分なしは exit 0。
+func runPushDryRun(cwd string, target string, stdout, stderr io.Writer) int {
+	return runDryRun(cwd, target, stdout, stderr, sync.DryRunPush)
+}
+
+// runPullDryRun は pull の差分相当を stdout に出し、書き込みは行わない。
+// 差分ありは exit 1、差分なしは exit 0。
+func runPullDryRun(cwd string, target string, stdout, stderr io.Writer) int {
+	return runDryRun(cwd, target, stdout, stderr, sync.DryRunPull)
 }

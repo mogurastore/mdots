@@ -31,17 +31,113 @@ func Push(storeRoot string, entries []config.Entry) error {
 // Diff は Store の src と dest の差分を diff -u 風の文字列で返す。
 // 差分がない Entry は出力に含めない。差分が1件でもあれば hasDiff=true。
 // src/dest が不在・ディレクトリの場合はエラーで中断する。
+// 実体は単一の差分コア（欠落時ポリシーのみ引数化）への薄い委譲である。
 func Diff(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
+	return diffCore(storeRoot, entries, policyStrict)
+}
+
+// missingPolicy は差分コアにおける欠落時の扱いを表す。
+// 出力・exitの振る舞いは変えず、欠落時ポリシーの違いのみを引数化する。
+type missingPolicy int
+
+const (
+	// policyStrict は Diff 用：src/dest のいずれの欠落もエラーにする。
+	policyStrict missingPolicy = iota
+	// policyPushDryRun は push の dry-run 用：dest 不在を新規作成予定として報告する。
+	policyPushDryRun
+	// policyPullDryRun は pull の dry-run 用：Store の src 不在を新規回収予定として報告する。
+	policyPullDryRun
+)
+
+// opLabel は差分コアのエラー接頭辞をポリシーから導く。
+// 従来の Diff/dry-run の文面をそのまま保つ。
+func (p missingPolicy) opLabel() string {
+	switch p {
+	case policyPushDryRun:
+		return "dry-run push"
+	case policyPullDryRun:
+		return "dry-run pull"
+	default:
+		return "diff"
+	}
+}
+
+// writeNewFileNotice は欠落時の新規作成予定報告を一本化する。文面自体は従来通り。
+func writeNewFileNotice(sb *strings.Builder, srcLabel, destLabel, body string) {
+	sb.WriteString("--- " + srcLabel + "\n")
+	sb.WriteString("+++ " + destLabel + "\n")
+	sb.WriteString(body)
+}
+
+// diffCore は dry-run 系と Diff の単一の差分コアである。
+// 両方存在する Entry は unified diff を出し、不在の扱いだけを policy で切り替える。
+// 自前の unified diff 実装・出力文面・exitの対応（hasDiff）は変えない。
+func diffCore(storeRoot string, entries []config.Entry, policy missingPolicy) (string, bool, error) {
+	op := policy.opLabel()
 	var sb strings.Builder
+	hasDiff := false
 	for _, e := range entries {
 		destPath, err := config.ExpandDest(e.Dest)
 		if err != nil {
-			return "", false, fmt.Errorf("diff %s: dest expand: %w", e.Src, err)
+			return "", false, fmt.Errorf("%s %s: dest expand: %w", op, e.Src, err)
 		}
 		srcPath := filepath.Join(storeRoot, e.Src)
-		d, same, err := diffFile(srcPath, destPath, e.Src, e.Dest)
+		srcInfo, srcErr := os.Stat(srcPath)
+		destInfo, destErr := os.Stat(destPath)
+		switch policy {
+		case policyPushDryRun:
+			if srcErr != nil {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
+			}
+			if srcInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
+			}
+			if destErr != nil {
+				if !os.IsNotExist(destErr) {
+					return "", false, fmt.Errorf("%s %s: %w", op, e.Src, destErr)
+				}
+				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Dest+" would be created)\n")
+				hasDiff = true
+				continue
+			}
+			if destInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
+			}
+		case policyPullDryRun:
+			if destErr != nil {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, destErr)
+			}
+			if destInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
+			}
+			if srcErr != nil {
+				if !os.IsNotExist(srcErr) {
+					return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
+				}
+				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n")
+				hasDiff = true
+				continue
+			}
+			if srcInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: Store src is a directory: %s", op, e.Src, srcPath)
+			}
+		default:
+			if srcErr != nil {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
+			}
+			if srcInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
+			}
+			if destErr != nil {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, destErr)
+			}
+			if destInfo.IsDir() {
+				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
+			}
+		}
+		d, same, err := diffContent(srcPath, destPath, e.Src, e.Dest)
 		if err != nil {
-			return "", false, fmt.Errorf("diff %s: %w", e.Src, err)
+			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
 		}
 		if !same {
 			sb.WriteString(d)
@@ -51,22 +147,9 @@ func Diff(storeRoot string, entries []config.Entry) (output string, hasDiff bool
 	return sb.String(), hasDiff, nil
 }
 
-// diffFile は2ファイルの unified diff を返す。同一内容なら same=true。
-func diffFile(srcPath, destPath, srcLabel, destLabel string) (diffText string, same bool, err error) {
-	srcInfo, err := os.Stat(srcPath)
-	if err != nil {
-		return "", false, err
-	}
-	if srcInfo.IsDir() {
-		return "", false, fmt.Errorf("src is a directory: %s", srcPath)
-	}
-	destInfo, err := os.Stat(destPath)
-	if err != nil {
-		return "", false, err
-	}
-	if destInfo.IsDir() {
-		return "", false, fmt.Errorf("dest is a directory: %s", destPath)
-	}
+// diffContent は存在確認済みの2ファイルの unified diff を返す。同一内容なら same=true。
+// stat は呼び出し側の差分コアで済ませているため、ここでは読み込みと比較のみ行う。
+func diffContent(srcPath, destPath, srcLabel, destLabel string) (diffText string, same bool, err error) {
 	srcData, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", false, err
@@ -147,79 +230,18 @@ func unifiedBody(srcLines, destLines []string) string {
 // 両方存在する Entry は Diff と同じ unified diff を出し、
 // dest 不在の Entry は新規作成予定として報告する。
 // src 不在・ディレクトリは push と同様にエラーで中断する。
+// 実体は単一の差分コアへの薄い委譲である。
 func DryRunPush(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
-	return dryRun(storeRoot, entries, "push")
+	return diffCore(storeRoot, entries, policyPushDryRun)
 }
 
 // DryRunPull は pull の差分相当を返す。実際の書き込みは行わない。
 // 両方存在する Entry は Diff と同じ unified diff を出し、
 // Store の src 不在の Entry は新規回収予定として報告する。
 // dest 不在・ディレクトリは pull と同様にエラーで中断する。
+// 実体は単一の差分コアへの薄い委譲である。
 func DryRunPull(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
-	return dryRun(storeRoot, entries, "pull")
-}
-
-// dryRun は direction ("push"/"pull") に応じた欠落時の扱いで差分相当を作る。
-func dryRun(storeRoot string, entries []config.Entry, direction string) (string, bool, error) {
-	var sb strings.Builder
-	hasDiff := false
-	for _, e := range entries {
-		destPath, err := config.ExpandDest(e.Dest)
-		if err != nil {
-			return "", false, fmt.Errorf("dry-run %s %s: dest expand: %w", direction, e.Src, err)
-		}
-		srcPath := filepath.Join(storeRoot, e.Src)
-		if direction == "push" {
-			srcInfo, err := os.Stat(srcPath)
-			if err != nil {
-				return "", false, fmt.Errorf("dry-run push %s: %w", e.Src, err)
-			}
-			if srcInfo.IsDir() {
-				return "", false, fmt.Errorf("dry-run push %s: src is a directory: %s", e.Src, srcPath)
-			}
-			if destInfo, err := os.Stat(destPath); err != nil {
-				if !os.IsNotExist(err) {
-					return "", false, fmt.Errorf("dry-run push %s: %w", e.Src, err)
-				}
-				sb.WriteString("--- " + e.Src + "\n")
-				sb.WriteString("+++ " + e.Dest + "\n")
-				sb.WriteString("(new file: " + e.Dest + " would be created)\n")
-				hasDiff = true
-				continue
-			} else if destInfo.IsDir() {
-				return "", false, fmt.Errorf("dry-run push %s: dest is a directory: %s", e.Src, destPath)
-			}
-		} else {
-			destInfo, err := os.Stat(destPath)
-			if err != nil {
-				return "", false, fmt.Errorf("dry-run pull %s: %w", e.Src, err)
-			}
-			if destInfo.IsDir() {
-				return "", false, fmt.Errorf("dry-run pull %s: dest is a directory: %s", e.Src, destPath)
-			}
-			if srcInfo, err := os.Stat(srcPath); err != nil {
-				if !os.IsNotExist(err) {
-					return "", false, fmt.Errorf("dry-run pull %s: %w", e.Src, err)
-				}
-				sb.WriteString("--- " + e.Src + "\n")
-				sb.WriteString("+++ " + e.Dest + "\n")
-				sb.WriteString("(new file: " + e.Src + " would be created in Store)\n")
-				hasDiff = true
-				continue
-			} else if srcInfo.IsDir() {
-				return "", false, fmt.Errorf("dry-run pull %s: Store src is a directory: %s", e.Src, srcPath)
-			}
-		}
-		d, same, err := diffFile(srcPath, destPath, e.Src, e.Dest)
-		if err != nil {
-			return "", false, fmt.Errorf("dry-run %s %s: %w", direction, e.Src, err)
-		}
-		if !same {
-			sb.WriteString(d)
-			hasDiff = true
-		}
-	}
-	return sb.String(), hasDiff, nil
+	return diffCore(storeRoot, entries, policyPullDryRun)
 }
 
 // Pull は dest を Store の src へファイルコピーする。
