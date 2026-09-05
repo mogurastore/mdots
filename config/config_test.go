@@ -45,17 +45,30 @@ func TestFilterByTarget(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (Store の mdots.yaml 読込・validation)
+// Seam: config パッケージ公開境界 (Store の mdots.toml 読込・validation)
 // Entry の src/dest 必須と target の string | string[] を外部挙動で検証する。
 func TestLoadStoreConfig(t *testing.T) {
 	t.Run("stringと配列のTargetを読み込める", func(t *testing.T) {
 		dir := t.TempDir()
-		p := filepath.Join(dir, "mdots.yaml")
-		body := "entries:\n" +
-			"  - src: vimrc\n    dest: ~/.vimrc\n" +
-			"  - src: wezterm.lua\n    dest: ~/.config/wezterm/wezterm.lua\n    target: win\n" +
-			"  - src: shared.conf\n    dest: ~/.config/shared.conf\n    target: [win, wsl]\n" +
-			"  - src: common.conf\n    dest: ~/.config/common.conf\n    target: common\n"
+		p := filepath.Join(dir, "mdots.toml")
+		body := "[[entries]]\n" +
+			"src = \"vimrc\"\n" +
+			"dest = \"~/.vimrc\"\n" +
+			"\n" +
+			"[[entries]]\n" +
+			"src = \"wezterm.lua\"\n" +
+			"dest = \"~/.config/wezterm/wezterm.lua\"\n" +
+			"target = \"win\"\n" +
+			"\n" +
+			"[[entries]]\n" +
+			"src = \"shared.conf\"\n" +
+			"dest = \"~/.config/shared.conf\"\n" +
+			"target = [\"win\", \"wsl\"]\n" +
+			"\n" +
+			"[[entries]]\n" +
+			"src = \"common.conf\"\n" +
+			"dest = \"~/.config/common.conf\"\n" +
+			"target = \"common\"\n"
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -77,12 +90,12 @@ func TestLoadStoreConfig(t *testing.T) {
 	t.Run("src/dest必須のvalidation", func(t *testing.T) {
 		dir := t.TempDir()
 		cases := map[string]string{
-			"src欠落":     "entries:\n  - dest: ~/.a\n",
-			"dest欠落":    "entries:\n  - src: a\n",
-			"target型不正": "entries:\n  - src: a\n    dest: ~/.a\n    target: 123\n",
+			"src欠落":     "[[entries]]\ndest = \"~/.a\"\n",
+			"dest欠落":    "[[entries]]\nsrc = \"a\"\n",
+			"target型不正": "[[entries]]\nsrc = \"a\"\ndest = \"~/.a\"\ntarget = 123\n",
 		}
 		for name, body := range cases {
-			p := filepath.Join(dir, "mdots.yaml")
+			p := filepath.Join(dir, "mdots.toml")
 			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -112,11 +125,11 @@ func TestExpandDest(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (Store 発見)
-// カレント直下の mdots.yaml のみを参照する外部挙動を t.TempDir() の実FSで検証する。
+// カレント直下の mdots.toml のみを参照する外部挙動を t.TempDir() の実FSで検証する。
 func TestFindStore(t *testing.T) {
 	t.Run("カレント直下のStoreを発見できる", func(t *testing.T) {
 		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "mdots.toml"), []byte(""), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		got, err := FindStore(root)
@@ -130,7 +143,7 @@ func TestFindStore(t *testing.T) {
 
 	t.Run("サブディレクトリからは失敗しin形式のエラー", func(t *testing.T) {
 		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "mdots.toml"), []byte(""), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		sub := filepath.Join(root, "a", "b")
@@ -141,8 +154,8 @@ func TestFindStore(t *testing.T) {
 		if err == nil {
 			t.Fatal("エラー expected, got nil")
 		}
-		if !strings.Contains(err.Error(), "mdots.yaml not found in "+sub) {
-			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.yaml not found in "+sub)
+		if !strings.Contains(err.Error(), "mdots.toml not found in "+sub) {
+			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.toml not found in "+sub)
 		}
 	})
 
@@ -152,8 +165,8 @@ func TestFindStore(t *testing.T) {
 		if err == nil {
 			t.Fatal("エラー expected, got nil")
 		}
-		if !strings.Contains(err.Error(), "mdots.yaml not found in "+start) {
-			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.yaml not found in "+start)
+		if !strings.Contains(err.Error(), "mdots.toml not found in "+start) {
+			t.Errorf("エラーメッセージ不正: got %q, want contain %q", err.Error(), "mdots.toml not found in "+start)
 		}
 		if strings.Contains(err.Error(), "searched from") {
 			t.Errorf("旧文言が残っている: got %q", err.Error())

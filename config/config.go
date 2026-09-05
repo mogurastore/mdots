@@ -6,45 +6,48 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/BurntSushi/toml"
 )
 
-// Config は Store 直下の mdots.yaml 全体を表す。
+// Config は Store 直下の mdots.toml 全体を表す。
 type Config struct {
-	Entries []Entry `yaml:"entries"`
+	Entries []Entry `toml:"entries"`
 }
 
 // Entry は1つの管理対象を表す src/dest ペア。
 // src は Store 相対のファイルパス、dest は ~ 展開される配置先パス。
 // Target は適用先を識別する自由文字列。省略時は common として扱う。
 type Entry struct {
-	Src    string     `yaml:"src"`
-	Dest   string     `yaml:"dest"`
-	Target TargetList `yaml:"target,omitempty"`
+	Src    string     `toml:"src"`
+	Dest   string     `toml:"dest"`
+	Target TargetList `toml:"target,omitempty"`
 }
 
 // TargetList は string | string[] を受け付ける Target の集合。
 type TargetList []string
 
-// UnmarshalYAML は string | string[] の両方を受け付ける。
-func (t *TargetList) UnmarshalYAML(value *yaml.Node) error {
-	switch value.Tag {
-	case "!!str":
-		var single string
-		if err := value.Decode(&single); err != nil {
-			return err
-		}
-		*t = TargetList{single}
-		return nil
-	case "!!seq":
-		var multi []string
-		if err := value.Decode(&multi); err != nil {
-			return fmt.Errorf("target must be string or string[]")
-		}
-		*t = TargetList(multi)
-		return nil
-	case "!!null":
+// UnmarshalTOML は string | string[] の両方を受け付ける。
+func (t *TargetList) UnmarshalTOML(value interface{}) error {
+	switch v := value.(type) {
+	case nil:
 		*t = nil
+		return nil
+	case string:
+		*t = TargetList{v}
+		return nil
+	case []interface{}:
+		out := make(TargetList, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("target must be string or string[]")
+			}
+			out = append(out, s)
+		}
+		*t = out
+		return nil
+	case []string:
+		*t = TargetList(v)
 		return nil
 	default:
 		return fmt.Errorf("target must be string or string[]")
@@ -93,14 +96,14 @@ func FilterByTarget(entries []Entry, target string) []Entry {
 	return out
 }
 
-// Load は Store の mdots.yaml を読み込み、validation して返す。
+// Load は Store の mdots.toml を読み込み、validation して返す。
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -147,15 +150,15 @@ func (e Entry) ExpandedDest() (string, error) {
 	return ExpandDest(e.Dest)
 }
 
-// FindStore はカレント直下の mdots.yaml のみを参照し、
+// FindStore はカレント直下の mdots.toml のみを参照し、
 // 見つかった Store ルートを返す。見つからないときは in <cwd> 形式のエラーを返す。
 func FindStore(startDir string) (string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(filepath.Join(abs, "mdots.yaml")); err == nil {
+	if _, err := os.Stat(filepath.Join(abs, "mdots.toml")); err == nil {
 		return abs, nil
 	}
-	return "", fmt.Errorf("mdots.yaml not found in %s", abs)
+	return "", fmt.Errorf("mdots.toml not found in %s", abs)
 }

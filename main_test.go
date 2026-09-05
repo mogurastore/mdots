@@ -8,8 +8,8 @@ import (
 
 // setupStoreWithHome は Store 準備・HOME 隔離の定型を集約する。
 // storeFiles は Store 直下に作るファイル群、homeFiles は HOME 直下に作る
-// ファイル群、yaml は mdots.yaml の本文。HOME は t.Setenv で隔離する。
-func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, yaml string) (store, home string) {
+// ファイル群、tomlBody は mdots.toml の本文。HOME は t.Setenv で隔離する。
+func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, tomlBody string) (store, home string) {
 	t.Helper()
 	store = t.TempDir()
 	home = t.TempDir()
@@ -24,7 +24,7 @@ func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, y
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store, "mdots.toml"), []byte(tomlBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return store, home
@@ -38,7 +38,7 @@ func TestPushEndToEnd(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "set number\n"},
 		nil,
-		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 	)
 
 	if code := run([]string{"push"}, store); code != 0 {
@@ -62,10 +62,9 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 			"wsl.conf":    "wsl\n",
 		},
 		nil,
-		"entries:\n"+
-			"  - src: common.conf\n    dest: ~/.common.conf\n"+
-			"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n"+
-			"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n",
+		"[[entries]]\nsrc = \"common.conf\"\ndest = \"~/.common.conf\"\n"+
+			"[[entries]]\nsrc = \"win.conf\"\ndest = \"~/.win.conf\"\ntarget = \"win\"\n"+
+			"[[entries]]\nsrc = \"wsl.conf\"\ndest = \"~/.wsl.conf\"\ntarget = \"wsl\"\n",
 	)
 
 	if code := run([]string{"push", "--target", "win"}, store); code != 0 {
@@ -85,7 +84,7 @@ func TestPushFromSubdirFails(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "x\n"},
 		nil,
-		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 	)
 	sub := filepath.Join(store, "a", "b")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -104,7 +103,7 @@ func TestPullEndToEnd(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "edited\n"},
-		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 	)
 
 	if code := run([]string{"pull"}, store); code != 0 {
@@ -124,7 +123,7 @@ func TestPullMissingDestIsError(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		nil,
-		"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 	)
 
 	if code := run([]string{"pull"}, store); code == 0 {
@@ -137,7 +136,7 @@ func TestDiffExitCodes(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "set number\n"},
 			map[string]string{".vimrc": "set number\n"},
-			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		)
 		if code := run([]string{"diff"}, store); code != 0 {
 			t.Errorf("run(diff) without changes: exit = %d, want 0", code)
@@ -148,7 +147,7 @@ func TestDiffExitCodes(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "set number\n"},
 			map[string]string{".vimrc": "set nonumber\n"},
-			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		)
 		if code := run([]string{"diff"}, store); code == 0 {
 			t.Error("run(diff) with changes: exit = 0, want non-zero")
