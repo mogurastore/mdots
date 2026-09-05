@@ -9,18 +9,35 @@ import (
 	"github.com/mogurastore/mdots/config"
 )
 
+// setupSyncDirs は Store/dest の実FS準備の定型を集約する。
+func setupSyncDirs(t *testing.T) (store, destRoot string) {
+	t.Helper()
+	return t.TempDir(), t.TempDir()
+}
+
+// writeTestFile はテスト用ファイル書き込みの定型を集約する。
+func writeTestFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// isolateHome は dest の ~ 展開先を隔離する定型を集約する。
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
 // Seam: sync パッケージ公開境界 (push)
 // Store/src → dest のファイルコピーを t.TempDir() の実FSで検証する。
 func TestPushCopiesStoreToDest(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	store, destRoot := setupSyncDirs(t)
 
-	srcPath := filepath.Join(store, "vimrc")
-	if err := os.WriteFile(srcPath, []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dest := filepath.Join(home, ".vimrc")
+	writeTestFile(t, filepath.Join(store, "vimrc"), "set number\n")
+	dest := filepath.Join(destRoot, ".vimrc")
 	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
 
 	if err := Push(store, entries); err != nil {
@@ -36,13 +53,9 @@ func TestPushCopiesStoreToDest(t *testing.T) {
 }
 
 func TestPushCreatesParentDirs(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
-	srcPath := filepath.Join(store, "wezterm.lua")
-	if err := os.WriteFile(srcPath, []byte("return {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "wezterm.lua"), "return {}\n")
 	dest := filepath.Join(destRoot, ".config", "wezterm", "wezterm.lua")
 	entries := []config.Entry{{Src: "wezterm.lua", Dest: dest}}
 
@@ -55,14 +68,10 @@ func TestPushCreatesParentDirs(t *testing.T) {
 }
 
 func TestPushExpandsHomeDest(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	store, _ := setupSyncDirs(t)
+	home := isolateHome(t)
 
-	srcPath := filepath.Join(store, "bashrc")
-	if err := os.WriteFile(srcPath, []byte("export X=1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "bashrc"), "export X=1\n")
 	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc"}}
 
 	if err := Push(store, entries); err != nil {
@@ -79,8 +88,7 @@ func TestPushExpandsHomeDest(t *testing.T) {
 
 func TestPushRejectsDirectories(t *testing.T) {
 	t.Run("srcがディレクトリはエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
+		store, destRoot := setupSyncDirs(t)
 		if err := os.MkdirAll(filepath.Join(store, "mydir"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -91,11 +99,8 @@ func TestPushRejectsDirectories(t *testing.T) {
 	})
 
 	t.Run("destがディレクトリはエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
-		if err := os.WriteFile(filepath.Join(store, "a"), []byte("a"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "a")
 		destDir := filepath.Join(destRoot, "existing")
 		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			t.Fatal(err)
@@ -108,16 +113,11 @@ func TestPushRejectsDirectories(t *testing.T) {
 }
 
 func TestPushOverwritesExisting(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
-	if err := os.WriteFile(filepath.Join(store, "a"), []byte("new"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "a"), "new")
 	dest := filepath.Join(destRoot, "a")
-	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "old")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
 	if err := Push(store, entries); err != nil {
@@ -133,11 +133,11 @@ func TestPushOverwritesExisting(t *testing.T) {
 }
 
 func TestPushPreservesPermission(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	srcPath := filepath.Join(store, "run.sh")
-	if err := os.WriteFile(srcPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	writeTestFile(t, srcPath, "#!/bin/sh\n")
+	if err := os.Chmod(srcPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(destRoot, "run.sh")
@@ -158,14 +158,10 @@ func TestPushPreservesPermission(t *testing.T) {
 // Seam: sync パッケージ公開境界 (pull)
 // dest → Store/src のファイルコピーを t.TempDir() の実FSで検証する。
 func TestPullCopiesDestToStore(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	store, destRoot := setupSyncDirs(t)
 
-	dest := filepath.Join(home, ".vimrc")
-	if err := os.WriteFile(dest, []byte("edited\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dest := filepath.Join(destRoot, ".vimrc")
+	writeTestFile(t, dest, "edited\n")
 	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
 
 	if err := Pull(store, entries); err != nil {
@@ -181,16 +177,13 @@ func TestPullCopiesDestToStore(t *testing.T) {
 }
 
 func TestPullCreatesParentDirsOnStoreSide(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	dest := filepath.Join(destRoot, ".config", "wezterm", "wezterm.lua")
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dest, []byte("return {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "return {}\n")
 	entries := []config.Entry{{Src: filepath.Join(".config", "wezterm", "wezterm.lua"), Dest: dest}}
 
 	if err := Pull(store, entries); err != nil {
@@ -202,13 +195,10 @@ func TestPullCreatesParentDirsOnStoreSide(t *testing.T) {
 }
 
 func TestPullExpandsHomeDest(t *testing.T) {
-	store := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	store, _ := setupSyncDirs(t)
+	home := isolateHome(t)
 
-	if err := os.WriteFile(filepath.Join(home, ".bashrc"), []byte("export X=1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(home, ".bashrc"), "export X=1\n")
 	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc"}}
 
 	if err := Pull(store, entries); err != nil {
@@ -225,8 +215,7 @@ func TestPullExpandsHomeDest(t *testing.T) {
 
 func TestPullRejectsDirectories(t *testing.T) {
 	t.Run("destがディレクトリはエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
+		store, destRoot := setupSyncDirs(t)
 		destDir := filepath.Join(destRoot, "existing")
 		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			t.Fatal(err)
@@ -238,12 +227,9 @@ func TestPullRejectsDirectories(t *testing.T) {
 	})
 
 	t.Run("Store側がディレクトリはエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
+		store, destRoot := setupSyncDirs(t)
 		dest := filepath.Join(destRoot, "a")
-		if err := os.WriteFile(dest, []byte("a"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeTestFile(t, dest, "a")
 		if err := os.MkdirAll(filepath.Join(store, "a"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -255,8 +241,7 @@ func TestPullRejectsDirectories(t *testing.T) {
 }
 
 func TestPullMissingDestIsError(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
 	if err := Pull(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
@@ -264,17 +249,12 @@ func TestPullMissingDestIsError(t *testing.T) {
 }
 
 func TestPullOverwritesExisting(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	dest := filepath.Join(destRoot, "a")
-	if err := os.WriteFile(dest, []byte("new"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "new")
 	srcPath := filepath.Join(store, "a")
-	if err := os.WriteFile(srcPath, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, srcPath, "old")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
 	if err := Pull(store, entries); err != nil {
@@ -290,11 +270,11 @@ func TestPullOverwritesExisting(t *testing.T) {
 }
 
 func TestPullPreservesPermission(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	dest := filepath.Join(destRoot, "run.sh")
-	if err := os.WriteFile(dest, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	writeTestFile(t, dest, "#!/bin/sh\n")
+	if err := os.Chmod(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	entries := []config.Entry{{Src: "run.sh", Dest: dest}}
@@ -312,8 +292,7 @@ func TestPullPreservesPermission(t *testing.T) {
 }
 
 func TestPushMissingSrcIsError(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
 	if err := Push(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
@@ -323,17 +302,12 @@ func TestPushMissingSrcIsError(t *testing.T) {
 // Seam: sync パッケージ公開境界 (diff)
 // Store/src と dest の差分を diff -u 風に出力する。実FSで検証する。
 func TestDiffNoDiffWhenIdentical(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	srcPath := filepath.Join(store, "vimrc")
-	if err := os.WriteFile(srcPath, []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, srcPath, "set number\n")
 	dest := filepath.Join(destRoot, ".vimrc")
-	if err := os.WriteFile(dest, []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "set number\n")
 	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
 
 	out, hasDiff, err := Diff(store, entries)
@@ -349,17 +323,12 @@ func TestDiffNoDiffWhenIdentical(t *testing.T) {
 }
 
 func TestDiffShowsUnifiedDiffWhenDifferent(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	srcPath := filepath.Join(store, "vimrc")
-	if err := os.WriteFile(srcPath, []byte("set number\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, srcPath, "set number\n")
 	dest := filepath.Join(destRoot, ".vimrc")
-	if err := os.WriteFile(dest, []byte("set nonumber\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "set nonumber\n")
 	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
 
 	out, hasDiff, err := Diff(store, entries)
@@ -376,12 +345,9 @@ func TestDiffShowsUnifiedDiffWhenDifferent(t *testing.T) {
 
 func TestDiffMissingFileIsError(t *testing.T) {
 	t.Run("src不在はエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
+		store, destRoot := setupSyncDirs(t)
 		dest := filepath.Join(destRoot, "a")
-		if err := os.WriteFile(dest, []byte("a"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeTestFile(t, dest, "a")
 		entries := []config.Entry{{Src: "missing", Dest: dest}}
 		if _, _, err := Diff(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
@@ -389,11 +355,8 @@ func TestDiffMissingFileIsError(t *testing.T) {
 	})
 
 	t.Run("dest不在はエラー", func(t *testing.T) {
-		store := t.TempDir()
-		destRoot := t.TempDir()
-		if err := os.WriteFile(filepath.Join(store, "a"), []byte("a"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "a")
 		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "missing")}}
 		if _, _, err := Diff(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
@@ -402,21 +365,12 @@ func TestDiffMissingFileIsError(t *testing.T) {
 }
 
 func TestDiffMultipleEntriesOnlyDifferingOutput(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
-	if err := os.WriteFile(filepath.Join(store, "same"), []byte("same\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(destRoot, "same"), []byte("same\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store, "changed"), []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(destRoot, "changed"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "same"), "same\n")
+	writeTestFile(t, filepath.Join(destRoot, "same"), "same\n")
+	writeTestFile(t, filepath.Join(store, "changed"), "old\n")
+	writeTestFile(t, filepath.Join(destRoot, "changed"), "new\n")
 	entries := []config.Entry{
 		{Src: "same", Dest: filepath.Join(destRoot, "same")},
 		{Src: "changed", Dest: filepath.Join(destRoot, "changed")},

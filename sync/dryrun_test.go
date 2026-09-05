@@ -11,17 +11,13 @@ import (
 
 // Seam: sync パッケージ公開境界 (push/pull の dry-run)
 // 実FS上で書き込みなし・差分相当出力の外部挙動のみを検証する。
+// Store/dest 準備の定型は sync_test.go のヘルパに集約している。
 func TestDryRunPushShowsDiffWithoutWriting(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
-	if err := os.WriteFile(filepath.Join(store, "a"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
-	if err := os.WriteFile(dest, []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "old\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
 	out, hasDiff, err := DryRunPush(store, entries)
@@ -40,12 +36,9 @@ func TestDryRunPushShowsDiffWithoutWriting(t *testing.T) {
 }
 
 func TestDryRunPushReportsNewFileWithoutCreating(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
-	if err := os.WriteFile(filepath.Join(store, "a"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
@@ -65,8 +58,7 @@ func TestDryRunPushReportsNewFileWithoutCreating(t *testing.T) {
 }
 
 func TestDryRunPushMissingSrcIsError(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
 	if _, _, err := DryRunPush(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
@@ -74,17 +66,12 @@ func TestDryRunPushMissingSrcIsError(t *testing.T) {
 }
 
 func TestDryRunPullShowsDiffWithoutWriting(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	srcPath := filepath.Join(store, "a")
-	if err := os.WriteFile(srcPath, []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, srcPath, "old\n")
 	dest := filepath.Join(destRoot, "a")
-	if err := os.WriteFile(dest, []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "new\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
 	out, hasDiff, err := DryRunPull(store, entries)
@@ -103,13 +90,10 @@ func TestDryRunPullShowsDiffWithoutWriting(t *testing.T) {
 }
 
 func TestDryRunPullReportsNewStoreFileWithoutCreating(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 
 	dest := filepath.Join(destRoot, "a")
-	if err := os.WriteFile(dest, []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, dest, "new\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
 	out, hasDiff, err := DryRunPull(store, entries)
@@ -128,8 +112,7 @@ func TestDryRunPullReportsNewStoreFileWithoutCreating(t *testing.T) {
 }
 
 func TestDryRunPullMissingDestIsError(t *testing.T) {
-	store := t.TempDir()
-	destRoot := t.TempDir()
+	store, destRoot := setupSyncDirs(t)
 	entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "missing")}}
 	if _, _, err := DryRunPull(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
