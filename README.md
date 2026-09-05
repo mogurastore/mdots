@@ -11,8 +11,8 @@ Store（`mdots.toml` を含む管理リポジトリのルート）とホーム�
 # go install
 go install github.com/mogurastore/mdots@latest
 
-# mise (ubi バックエンド)
-mise use ubi:mogurastore/mdots@latest
+# mise (github バックエンド)
+mise use github:mogurastore/mdots@latest
 
 # GitHub Releases からバイナリを取得
 # https://github.com/mogurastore/mdots/releases から OS/Arch に合う
