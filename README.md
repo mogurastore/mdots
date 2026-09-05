@@ -1,7 +1,7 @@
 # mdots
 
 dotfilesをファイルコピー（非symlink）で管理するCLI。
-Store（`mdots.yaml` を含む管理リポジトリのルート）とホーム側を `push` / `pull` / `diff` で同期する。
+Store（`mdots.toml` を含む管理リポジトリのルート）とホーム側を `push` / `pull` / `diff` で同期する。
 
 ## 導入
 
@@ -21,21 +21,25 @@ mise use ubi:mogurastore/mdots@latest
 
 ## 最小サンプル
 
-Store（管理リポジトリ）の直下に `mdots.yaml` を置く。
+Store（管理リポジトリ）の直下に `mdots.toml` を置く。
 `src` は Store 相対のファイルパス、`dest` は `~` 展開される配置先パス、
 `target` は省略時 common 扱いの自由文字列（例: `win`, `wsl`）。
 
-```yaml
-# <Store>/mdots.yaml
-entries:
-  - src: vimrc
-    dest: ~/.vimrc
-  - src: wezterm.lua
-    dest: ~/.config/wezterm/wezterm.lua
-    target: win
-  - src: shared.conf
-    dest: ~/.config/shared.conf
-    target: [win, wsl]
+```toml
+# <Store>/mdots.toml
+[[entries]]
+src = "vimrc"
+dest = "~/.vimrc"
+
+[[entries]]
+src = "wezterm.lua"
+dest = "~/.config/wezterm/wezterm.lua"
+target = "win"
+
+[[entries]]
+src = "shared.conf"
+dest = "~/.config/shared.conf"
+target = ["win", "wsl"]
 ```
 
 ```sh
@@ -64,5 +68,5 @@ mdots --version         # バージョンを表示する（ldflags -X main.versi
 
 - `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。
 - `--dry-run` は実際に書き込まず差分相当を出力する。差分ありは exit 1、差分なしは exit 0。
-- `mdots.yaml` が見つからないときは `mdots.yaml not found in <cwd>` と表示し exit 1 になる。
-- Store はカレント直下の `mdots.yaml` のみ参照する。Store直下で実行し、サブディレクトリからは実行できない。
+- `mdots.toml` が見つからないときは `mdots.toml not found in <cwd>` と表示し exit 1 になる。
+- Store はカレント直下の `mdots.toml` のみ参照する。Store直下で実行し、サブディレクトリからは実行できない。

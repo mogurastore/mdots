@@ -18,7 +18,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, home := setupStoreWithHome(t,
 			map[string]string{"vimrc": "new\n"},
 			map[string]string{".vimrc": "old\n"},
-			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -37,7 +37,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "old\n"},
 			map[string]string{".vimrc": "new\n"},
-			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -56,7 +56,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"entries:\n  - src: vimrc\n    dest: ~/.vimrc\n",
+			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -67,7 +67,7 @@ func TestDryRunIntegration(t *testing.T) {
 }
 
 func TestDiffRejectsDryRun(t *testing.T) {
-	store, _ := setupStoreWithHome(t, nil, nil, "entries: []\n")
+	store, _ := setupStoreWithHome(t, nil, nil, "")
 	var out, errOut bytes.Buffer
 	if code := runWithWriters([]string{"diff", "--dry-run"}, store, &out, &errOut); code == 0 {
 		t.Error("run(diff --dry-run): exit = 0, want non-zero")
@@ -80,7 +80,7 @@ func TestStoreNotFoundFriendlyError(t *testing.T) {
 	if code := runWithWriters([]string{"push"}, empty, &out, &errOut); code == 0 {
 		t.Fatal("run(push) without Store: exit = 0, want non-zero")
 	}
-	if !strings.Contains(errOut.String(), "mdots.yaml not found in "+empty) {
+	if !strings.Contains(errOut.String(), "mdots.toml not found in "+empty) {
 		t.Errorf("stderr should contain friendly message, got %q", errOut.String())
 	}
 }

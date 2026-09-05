@@ -22,7 +22,7 @@ import (
 const GlobalHelp = `usage: mdots <push|pull|diff> [options]
 
 dotfilesをファイルコピー（非symlink）で管理するCLI。
-Store（mdots.yaml を含む管理リポジトリのルート）の直下で実行する。mdots.yaml はカレント直下のみ参照する。
+Store（mdots.toml を含む管理リポジトリのルート）の直下で実行する。mdots.toml はカレント直下のみ参照する。
 
 commands:
   push  Storeからdestへファイルをコピーする

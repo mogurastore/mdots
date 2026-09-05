@@ -59,7 +59,7 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	cfg, err := config.Load(filepath.Join(store, "mdots.yaml"))
+	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
 	if err != nil {
 		return "", nil, err
 	}

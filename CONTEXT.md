@@ -5,7 +5,7 @@ dotfilesをファイルコピー（非symlink）で管理するCLI。Store（管
 ## Language
 
 **Store**:
-mdots.yaml を含む管理リポジトリのルート。カレント直下のmdots.yamlのみ参照する。
+mdots.toml を含む管理リポジトリのルート。カレント直下のmdots.tomlのみ参照する。
 _Avoid_: repo, dotfiles repo
 
 **Entry**:
