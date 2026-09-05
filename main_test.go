@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -292,5 +293,148 @@ func TestPushWithoutStoreFails(t *testing.T) {
 	empty := t.TempDir()
 	if code := run([]string{"push"}, empty); code == 0 {
 		t.Error("run(push) without Store: exit = 0, want non-zero")
+	}
+}
+
+// Seam: CLIコマンド境界 (mdots diff)
+// 実FS上の Store/dest を用い、end-to-end の外部挙動のみを検証する。
+func TestDiffNoDiffExitsZero(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("set number\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("set number\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"diff"}, store); code != 0 {
+		t.Errorf("run(diff) without changes: exit = %d, want 0", code)
+	}
+	out, hasDiff, err := runDiff(store, "")
+	if err != nil {
+		t.Fatalf("runDiff error: %v", err)
+	}
+	if hasDiff {
+		t.Error("hasDiff = true, want false")
+	}
+	if out != "" {
+		t.Errorf("output = %q, want empty", out)
+	}
+}
+
+func TestDiffShowsDiffAndExitsNonZero(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.WriteFile(filepath.Join(store, "vimrc"), []byte("set number\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".vimrc"), []byte("set nonumber\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n  - src: vimrc\n    dest: ~/.vimrc\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"diff"}, store); code == 0 {
+		t.Error("run(diff) with changes: exit = 0, want non-zero")
+	}
+	out, hasDiff, err := runDiff(store, "")
+	if err != nil {
+		t.Fatalf("runDiff error: %v", err)
+	}
+	if !hasDiff {
+		t.Fatal("hasDiff = false, want true")
+	}
+	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
+		t.Errorf("output should contain ---/+++, got %q", out)
+	}
+}
+
+func TestDiffWithTargetFiltersCommonPlusTarget(t *testing.T) {
+	store := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// common は同一、win のみ差分あり、wsl は差分あっても対象外であるべき。
+	if err := os.WriteFile(filepath.Join(store, "common.conf"), []byte("common\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".common.conf"), []byte("common\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "win.conf"), []byte("win old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".win.conf"), []byte("win new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "wsl.conf"), []byte("wsl old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".wsl.conf"), []byte("wsl new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "entries:\n" +
+		"  - src: common.conf\n    dest: ~/.common.conf\n" +
+		"  - src: win.conf\n    dest: ~/.win.conf\n    target: win\n" +
+		"  - src: wsl.conf\n    dest: ~/.wsl.conf\n    target: wsl\n"
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, hasDiff, err := runDiff(store, "win")
+	if err != nil {
+		t.Fatalf("runDiff error: %v", err)
+	}
+	if !hasDiff {
+		t.Fatal("hasDiff = false, want true (win differs)")
+	}
+	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
+		t.Errorf("output should contain ---/+++, got %q", out)
+	}
+	if strings.Contains(out, "wsl.conf") {
+		t.Errorf("output should NOT contain wsl Entry with --target win, got %q", out)
+	}
+
+	// CLI フラグ経路も検証する: win 差分ありは exit 非ゼロ、対象外のみの差分は exit 0。
+	if code := run([]string{"diff", "--target", "win"}, store); code == 0 {
+		t.Error("run(diff --target win) with win changes: exit = 0, want non-zero")
+	}
+	if code := run([]string{"diff", "--target", "linux"}, store); code != 0 {
+		t.Errorf("run(diff --target linux) without applicable changes: exit = %d, want 0", code)
+	}
+}
+
+func TestDiffWithoutStoreFails(t *testing.T) {
+	empty := t.TempDir()
+	if code := run([]string{"diff"}, empty); code == 0 {
+		t.Error("run(diff) without Store: exit = 0, want non-zero")
+	}
+}
+
+func TestDiffTargetFlagErrors(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(store, "mdots.yaml"), []byte("entries: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"diff", "--target"},
+		{"diff", "--target="},
+		{"diff", "--unknown"},
+	} {
+		if code := run(args, store); code == 0 {
+			t.Errorf("run(%v): exit = 0, want non-zero", args)
+		}
 	}
 }
