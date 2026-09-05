@@ -64,5 +64,5 @@ mdots --version         # バージョンを表示する（ldflags -X main.versi
 
 - `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。
 - `--dry-run` は実際に書き込まず差分相当を出力する。差分ありは exit 1、差分なしは exit 0。
-- `mdots.yaml` が見つからないときは `mdots.yaml not found: searched from <cwd> to /` と表示し exit 1 になる。
-- Store はカレントから親方向に `mdots.yaml` を探索して発見する。サブディレクトリからでも実行できる。
+- `mdots.yaml` が見つからないときは `mdots.yaml not found in <cwd>` と表示し exit 1 になる。
+- Store はカレント直下の `mdots.yaml` のみ参照する。Store直下で実行し、サブディレクトリからは実行できない。

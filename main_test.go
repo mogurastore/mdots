@@ -34,7 +34,7 @@ func TestPushEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPushFromSubdirFindsStore(t *testing.T) {
+func TestPushFromSubdirFails(t *testing.T) {
 	store := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -51,11 +51,11 @@ func TestPushFromSubdirFindsStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := run([]string{"push"}, sub); code != 0 {
-		t.Fatalf("run(push) from subdir exit = %d, want 0", code)
+	if code := run([]string{"push"}, sub); code == 0 {
+		t.Fatal("run(push) from subdir exit = 0, want non-zero")
 	}
-	if _, err := os.Stat(filepath.Join(home, ".vimrc")); err != nil {
-		t.Errorf("dest not created from subdir: %v", err)
+	if _, err := os.Stat(filepath.Join(home, ".vimrc")); err == nil {
+		t.Error("dest must NOT be created from subdir")
 	}
 }
 

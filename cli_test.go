@@ -194,7 +194,7 @@ func TestStoreNotFoundFriendlyError(t *testing.T) {
 	if code := runWithWriters([]string{"push"}, empty, &out, &errOut); code == 0 {
 		t.Fatal("run(push) without Store: exit = 0, want non-zero")
 	}
-	if !strings.Contains(errOut.String(), "mdots.yaml not found: searched from ") {
+	if !strings.Contains(errOut.String(), "mdots.yaml not found in "+empty) {
 		t.Errorf("stderr should contain friendly message, got %q", errOut.String())
 	}
 }
