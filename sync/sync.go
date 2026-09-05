@@ -27,6 +27,24 @@ func Push(storeRoot string, entries []config.Entry) error {
 	return nil
 }
 
+// Pull は dest を Store の src へファイルコピーする。
+// Entry の src は Store 相対、dest は ~ 展開される配置先パス。
+// Push と同じく親ディレクトリは mkdir -p、パーミッションは元ファイルに追従、上書きは無確認。
+// dest が不在・ディレクトリの場合はエラーで中断する。Store 側がディレクトリの場合もエラーになる。
+func Pull(storeRoot string, entries []config.Entry) error {
+	for _, e := range entries {
+		destPath, err := config.ExpandDest(e.Dest)
+		if err != nil {
+			return fmt.Errorf("pull %s: dest expand: %w", e.Src, err)
+		}
+		srcPath := filepath.Join(storeRoot, e.Src)
+		if err := copyFile(destPath, srcPath); err != nil {
+			return fmt.Errorf("pull %s: %w", e.Src, err)
+		}
+	}
+	return nil
+}
+
 func copyFile(srcPath, destPath string) error {
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
