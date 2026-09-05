@@ -63,8 +63,8 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 		},
 		nil,
 		"[[entries]]\nsrc = \"common.conf\"\ndest = \"~/.common.conf\"\n"+
-			"[[entries]]\nsrc = \"win.conf\"\ndest = \"~/.win.conf\"\ntarget = \"win\"\n"+
-			"[[entries]]\nsrc = \"wsl.conf\"\ndest = \"~/.wsl.conf\"\ntarget = \"wsl\"\n",
+			"[[entries]]\nsrc = \"win.conf\"\ndest = \"~/.win.conf\"\ntarget = [\"win\"]\n"+
+			"[[entries]]\nsrc = \"wsl.conf\"\ndest = \"~/.wsl.conf\"\ntarget = [\"wsl\"]\n",
 	)
 
 	if code := run([]string{"push", "--target", "win"}, store); code != 0 {
