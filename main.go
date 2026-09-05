@@ -19,10 +19,10 @@ func main() {
 	os.Exit(run(os.Args[1:], cwd))
 }
 
-const usage = "usage: mdots <push|pull> [--target <name>]"
+const usage = "usage: mdots <push|pull|diff> [--target <name>]"
 
 func run(args []string, cwd string) int {
-	if len(args) == 0 || (args[0] != "push" && args[0] != "pull") {
+	if len(args) == 0 || (args[0] != "push" && args[0] != "pull" && args[0] != "diff") {
 		fmt.Fprintln(os.Stderr, usage)
 		return 1
 	}
@@ -34,10 +34,19 @@ func run(args []string, cwd string) int {
 		return 1
 	}
 	var runErr error
-	if cmd == "push" {
+	switch cmd {
+	case "push":
 		runErr = runPush(cwd, target)
-	} else {
+	case "pull":
 		runErr = runPull(cwd, target)
+	case "diff":
+		var out string
+		var hasDiff bool
+		out, hasDiff, runErr = runDiff(cwd, target)
+		if runErr == nil && hasDiff {
+			fmt.Fprint(os.Stdout, out)
+			return 1
+		}
 	}
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, runErr)
@@ -46,7 +55,7 @@ func run(args []string, cwd string) int {
 	return 0
 }
 
-// parseTargetArgs は push/pull の --target フラグを解釈する。
+// parseTargetArgs は push/pull/diff の --target フラグを解釈する。
 // `--target <name>` と `--target=<name>` を受け付ける。
 func parseTargetArgs(args []string) (string, error) {
 	var target string
@@ -102,4 +111,20 @@ func runPull(cwd string, target string) error {
 	}
 	entries := config.FilterByTarget(cfg.Entries, target)
 	return sync.Pull(store, entries)
+}
+
+// runDiff は common + 指定Target の Entry について Store/src と dest の
+// 差分を diff -u 風の文字列で返す。差分があれば hasDiff=true。
+// target 未指定時は common のみが対象になる。
+func runDiff(cwd string, target string) (string, bool, error) {
+	store, err := config.FindStore(cwd)
+	if err != nil {
+		return "", false, err
+	}
+	cfg, err := config.Load(filepath.Join(store, "mdots.yaml"))
+	if err != nil {
+		return "", false, err
+	}
+	entries := config.FilterByTarget(cfg.Entries, target)
+	return sync.Diff(store, entries)
 }
