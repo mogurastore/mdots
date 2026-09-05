@@ -30,7 +30,7 @@ func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, t
 	return store, home
 }
 
-// Seam: CLIコマンド境界 (mdots push/pull/diff の代表例)
+// Seam: CLIコマンド境界 (mdots push/pull の代表例)
 // 実FS上の Store/dest を用い、run 経由の外部挙動のみを検証する。
 // Target 展開・フラグ解釈・差分詳細は CLI・設定・同期の各境界テストに寄せ、
 // ここでは配線の代表例だけを残す。
@@ -131,34 +131,10 @@ func TestPullMissingDestIsError(t *testing.T) {
 	}
 }
 
-func TestDiffExitCodes(t *testing.T) {
-	t.Run("差分なしはexit 0", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t,
-			map[string]string{"vimrc": "set number\n"},
-			map[string]string{".vimrc": "set number\n"},
-			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
-		)
-		if code := run([]string{"diff"}, store); code != 0 {
-			t.Errorf("run(diff) without changes: exit = %d, want 0", code)
-		}
-	})
-
-	t.Run("差分ありはexit非ゼロ", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t,
-			map[string]string{"vimrc": "set number\n"},
-			map[string]string{".vimrc": "set nonumber\n"},
-			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
-		)
-		if code := run([]string{"diff"}, store); code == 0 {
-			t.Error("run(diff) with changes: exit = 0, want non-zero")
-		}
-	})
-}
-
-// Store 未発見時の失敗は3コマンド共通。文言自体は設定境界テストが保証する。
+// Store 未発見時の失敗は2コマンド共通。文言自体は設定境界テストが保証する。
 func TestCommandsWithoutStoreFail(t *testing.T) {
 	empty := t.TempDir()
-	for _, args := range [][]string{{"push"}, {"pull"}, {"diff"}} {
+	for _, args := range [][]string{{"push"}, {"pull"}} {
 		if code := run(args, empty); code == 0 {
 			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
 		}

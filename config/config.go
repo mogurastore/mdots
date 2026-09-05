@@ -151,7 +151,7 @@ func (e Entry) ExpandedDest() (string, error) {
 }
 
 // Template は init が作る mdots.toml 雛形である。
-// 見て使い方を理解できるよう日本語コメントで push/pull/diff と
+// 見て使い方を理解できるよう日本語コメントで push/pull と
 // src/dest/target を説明し、サンプル Entry はすべてコメントアウト済み。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
 const Template = `# mdots.toml — Store（このファイルがあるディレクトリ）直下で mdots を実行する。
@@ -161,7 +161,7 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 #   mdots push              # common のみを Store から dest へコピー
 #   mdots push --target win # common + win を対象にする
 #   mdots pull --target win # dest から Store へ回収する
-#   mdots diff              # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
+#   mdots push --dry-run    # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
 #
 # Entry（1つの管理対象）:
 #   src    = Store相対のファイルパス

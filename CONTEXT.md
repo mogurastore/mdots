@@ -1,6 +1,6 @@
 # mdots
 
-dotfilesをファイルコピー（非symlink）で管理するCLI。Store（管理リポジトリ）とホーム側を push/pull/diff で同期する。
+dotfilesをファイルコピー（非symlink）で管理するCLI。Store（管理リポジトリ）とホーム側を push/pull で同期する。
 
 ## Language
 
@@ -27,10 +27,6 @@ _Avoid_: deploy, apply
 **pull**:
 destからStoreへファイルを回収する操作。
 _Avoid_: capture, import
-
-**diff**:
-Storeとdestの差分を表示する操作。
-_Avoid_: status, check
 
 **init**:
 Storeにmdots.toml雛形を作る操作。

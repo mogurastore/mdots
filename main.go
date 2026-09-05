@@ -35,14 +35,12 @@ func runWithWriters(args []string, cwd string, stdout, stderr io.Writer) int {
 }
 
 // cliExecutor は cli.Executor への委譲口である。実行系の本体は本ファイルの
-// runPush/runPull/runDiff 系に残し、コマンド骨格だけを cli パッケージに置く。
+// runPush/runPull 系に残し、コマンド骨格だけを cli パッケージに置く。
 type cliExecutor struct{}
 
 func (cliExecutor) Push(cwd, target string) error { return runPush(cwd, target) }
 
 func (cliExecutor) Pull(cwd, target string) error { return runPull(cwd, target) }
-
-func (cliExecutor) Diff(cwd, target string) (string, bool, error) { return runDiff(cwd, target) }
 
 func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 
@@ -55,7 +53,7 @@ func (cliExecutor) PullDryRun(cwd, target string, stdout, stderr io.Writer) int 
 }
 
 // resolveEntries は Store 発見・設定読込・Target フィルタをまとめて行い、
-// push/pull/diff とその dry-run で共有する。
+// push/pull とその dry-run で共有する。
 func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -95,17 +93,6 @@ func runInit(cwd string) error {
 // target 未指定時は common のみが対象になる。
 func runPull(cwd string, target string) error {
 	return runCopy(cwd, target, sync.Pull)
-}
-
-// runDiff は common + 指定Target の Entry について Store/src と dest の
-// 差分を diff -u 風の文字列で返す。差分があれば hasDiff=true。
-// target 未指定時は common のみが対象になる。
-func runDiff(cwd string, target string) (string, bool, error) {
-	store, entries, err := resolveEntries(cwd, target)
-	if err != nil {
-		return "", false, err
-	}
-	return sync.Diff(store, entries)
 }
 
 // emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは 0。
