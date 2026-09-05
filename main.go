@@ -44,6 +44,8 @@ func (cliExecutor) Pull(cwd, target string) error { return runPull(cwd, target) 
 
 func (cliExecutor) Diff(cwd, target string) (string, bool, error) { return runDiff(cwd, target) }
 
+func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
+
 func (cliExecutor) PushDryRun(cwd, target string, stdout, stderr io.Writer) int {
 	return runPushDryRun(cwd, target, stdout, stderr)
 }
@@ -80,6 +82,13 @@ func runCopy(cwd string, target string, copyFn func(string, []config.Entry) erro
 // target 未指定時は common のみが対象になる。
 func runPush(cwd string, target string) error {
 	return runCopy(cwd, target, sync.Push)
+}
+
+// runInit はカレント直下に mdots.toml 雛形を作る。
+// 既にあるときは config.Init が already exists エラーを返す。
+func runInit(cwd string) error {
+	_, err := config.Init(cwd)
+	return err
 }
 
 // runPull は common + 指定Target の Entry を dest から Store へ回収する。

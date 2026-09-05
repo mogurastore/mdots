@@ -31,3 +31,7 @@ _Avoid_: capture, import
 **diff**:
 Storeとdestの差分を表示する操作。
 _Avoid_: status, check
+
+**init**:
+Storeにmdots.toml雛形を作る操作。
+_Avoid_: create, new, setup

@@ -22,6 +22,7 @@ mise use ubi:mogurastore/mdots@latest
 ## 最小サンプル
 
 Store（管理リポジトリ）の直下に `mdots.toml` を置く。
+`mdots init` でコメント付き雛形を作れる。
 `src` は Store 相対のファイルパス、`dest` は `~` 展開される配置先パス、
 `target` は省略時 common 扱いの自由文字列（例: `win`, `wsl`）。
 
@@ -65,8 +66,10 @@ mdots --version         # バージョンを表示する（ldflags -X main.versi
 | `push [--target <name>] [--dry-run]` | Store から dest へコピーする |
 | `pull [--target <name>] [--dry-run]` | dest から Store へ回収する |
 | `diff [--target <name>]` | Store と dest の差分を表示する |
+| `init` | カレント直下に `mdots.toml` 雛形を作る |
 
 - `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。
 - `--dry-run` は実際に書き込まず差分相当を出力する。差分ありは exit 1、差分なしは exit 0。
 - `mdots.toml` が見つからないときは `mdots.toml not found in <cwd>` と表示し exit 1 になる。
+- `init` は雛形を作る。既にあるときは `mdots.toml already exists in <cwd>` と表示し exit 1 になる。
 - Store はカレント直下の `mdots.toml` のみ参照する。Store直下で実行し、サブディレクトリからは実行できない。
