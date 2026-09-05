@@ -124,6 +124,34 @@ func TestExpandDest(t *testing.T) {
 	}
 }
 
+// Seam: config パッケージ公開境界 (init 雛形作成)
+// 空Store作成・既存ありエラー・生成物がLoadを通る外部挙動を検証する。
+func TestInitCreatesTemplate(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Init(dir)
+	if err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{"mdots push", "src =", "dest =", "target", "common", "[[entries]]"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("template should contain %q, got:\n%s", want, body)
+		}
+	}
+	if _, err := Load(p); err != nil {
+		t.Errorf("generated template must Load: %v", err)
+	}
+	if _, err := Init(dir); err == nil {
+		t.Fatal("second Init: エラー expected, got nil")
+	} else if !strings.Contains(err.Error(), "mdots.toml already exists in ") {
+		t.Errorf("既存ありエラーメッセージ不正: got %q", err.Error())
+	}
+}
+
 // Seam: config パッケージ公開境界 (Store 発見)
 // カレント直下の mdots.toml のみを参照する外部挙動を t.TempDir() の実FSで検証する。
 func TestFindStore(t *testing.T) {

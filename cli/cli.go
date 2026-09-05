@@ -19,7 +19,7 @@ import (
 	cliv3 "github.com/urfave/cli/v3"
 )
 
-const GlobalHelp = `usage: mdots <push|pull|diff> [options]
+const GlobalHelp = `usage: mdots <push|pull|diff|init> [options]
 
 dotfilesをファイルコピー（非symlink）で管理するCLI。
 Store（mdots.toml を含む管理リポジトリのルート）の直下で実行する。mdots.toml はカレント直下のみ参照する。
@@ -28,6 +28,7 @@ commands:
   push  Storeからdestへファイルをコピーする
   pull  destからStoreへファイルを回収する
   diff  Storeとdestの差分を表示する
+  init  Storeにmdots.toml雛形を作る
 
 global options:
   -h, --help     使い方を表示する
@@ -69,7 +70,17 @@ options:
   -h, --help       使い方を表示する
 `
 
-// Executor は push/pull/diff の内部実行系への委譲口である。
+const InitHelp = `usage: mdots init
+
+Storeにmdots.toml雛形を作る。
+カレント直下に雛形を作り、見て使い方が分かるコメントとサンプルを含む。
+既にあるときは mdots.toml already exists in <cwd> と表示し exit 1 になる。
+
+options:
+  -h, --help       使い方を表示する
+`
+
+// Executor は push/pull/diff/init の内部実行系への委譲口である。
 // 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
 type Executor interface {
 	Push(cwd, target string) error
@@ -77,6 +88,7 @@ type Executor interface {
 	Diff(cwd, target string) (out string, hasDiff bool, err error)
 	PushDryRun(cwd, target string, stdout, stderr io.Writer) int
 	PullDryRun(cwd, target string, stdout, stderr io.Writer) int
+	Init(cwd string) error
 }
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -116,7 +128,7 @@ func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writ
 	case "--version", "-V", "version":
 		fmt.Fprintf(stdout, "mdots %s\n", version)
 		return 0
-	case "push", "pull", "diff":
+	case "push", "pull", "diff", "init":
 		// 宣言ツリーへ進む。
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
@@ -203,6 +215,13 @@ func (r *runner) newCommand() *cliv3.Command {
 				},
 				OnUsageError: r.usageError(DiffHelp),
 				Action:       r.diffAction,
+			},
+			{
+				Name:               "init",
+				Usage:              "Storeにmdots.toml雛形を作る",
+				CustomHelpTemplate: InitHelp,
+				OnUsageError:       r.usageError(InitHelp),
+				Action:             r.initAction,
 			},
 			{
 				// version サブコマンドの宣言。従来の先頭トークン優先を保つため
@@ -350,5 +369,17 @@ func (r *runner) diffAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprint(r.stdout, out)
 		return &exitError{code: 1}
 	}
+	return nil
+}
+
+func (r *runner) initAction(_ context.Context, cmd *cliv3.Command) error {
+	if cmd.Args().Present() {
+		return r.argError(InitHelp, cmd.Args().First())
+	}
+	if err := r.exec.Init(r.cwd); err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
+	}
+	fmt.Fprintln(r.stdout, "created mdots.toml")
 	return nil
 }

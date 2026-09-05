@@ -32,6 +32,9 @@ type fakeExecutor struct {
 	pullDryCode  int
 	pullDryOut   string
 	pullDryCalls int
+
+	initCalls int
+	initErr   error
 }
 
 func (f *fakeExecutor) Push(cwd, target string) error {
@@ -63,6 +66,11 @@ func (f *fakeExecutor) PullDryRun(cwd, target string, stdout, stderr io.Writer) 
 	f.pullTarget = target
 	io.WriteString(stdout, f.pullDryOut)
 	return f.pullDryCode
+}
+
+func (f *fakeExecutor) Init(cwd string) error {
+	f.initCalls++
+	return f.initErr
 }
 
 func runCli(t *testing.T, ex Executor, args []string) (int, string, string) {
@@ -260,5 +268,62 @@ func TestCliExecutorErrorExitsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "boom") {
 		t.Errorf("stderr should contain executor error, got %q", errOut)
+	}
+}
+
+// Seam: CLIコマンド境界 (init 雛形作成)
+// 成功・help・余分引数・実行エラーの外部挙動のみを検証する。
+func TestCliInitDispatches(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, out, _ := runCli(t, ex, []string{"init"})
+	if code != 0 {
+		t.Fatalf("Run(init) exit = %d, want 0", code)
+	}
+	if ex.initCalls != 1 {
+		t.Fatalf("Init calls = %d, want 1", ex.initCalls)
+	}
+	for _, want := range []string{"created", "mdots.toml"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output should contain %q, got %q", want, out)
+		}
+	}
+}
+
+func TestCliInitHelp(t *testing.T) {
+	for _, args := range [][]string{{"init", "--help"}, {"init", "-h"}} {
+		ex := &fakeExecutor{}
+		code, out, _ := runCli(t, ex, args)
+		if code != 0 {
+			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
+		}
+		for _, want := range []string{"init", "mdots.toml"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
+			}
+		}
+		if ex.initCalls != 0 {
+			t.Errorf("Run(%v): Init must not run on --help", args)
+		}
+	}
+}
+
+func TestCliInitRejectsExtraArgs(t *testing.T) {
+	ex := &fakeExecutor{}
+	if code, _, _ := runCli(t, ex, []string{"init", "extra"}); code == 0 {
+		t.Error("Run(init extra): exit = 0, want non-zero")
+	}
+	if ex.initCalls != 0 {
+		t.Error("Init must not run with extra args")
+	}
+}
+
+func TestCliInitExecutorError(t *testing.T) {
+	ex := &fakeExecutor{initErr: errors.New("mdots.toml already exists in /tmp/x")}
+	code, _, errOut := runCli(t, ex, []string{"init"})
+	if code == 0 {
+		t.Fatal("Run(init) with executor error: exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "mdots.toml already exists") {
+		t.Errorf("stderr should contain already exists, got %q", errOut)
 	}
 }

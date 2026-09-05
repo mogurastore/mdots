@@ -150,6 +150,63 @@ func (e Entry) ExpandedDest() (string, error) {
 	return ExpandDest(e.Dest)
 }
 
+// Template は init が作る mdots.toml 雛形である。
+// 見て使い方を理解できるよう日本語コメントで push/pull/diff と
+// src/dest/target を説明し、サンプル Entry はすべてコメントアウト済み。
+// 生成物は Load/Validate を通る（Entry ゼロ件）。
+const Template = `# mdots.toml — Store（このファイルがあるディレクトリ）直下で mdots を実行する。
+# Store はカレント直下の mdots.toml のみ参照する。サブディレクトリからは実行できない。
+#
+# 使い方:
+#   mdots push              # common のみを Store から dest へコピー
+#   mdots push --target win # common + win を対象にする
+#   mdots pull --target win # dest から Store へ回収する
+#   mdots diff              # 差分を diff -u 風に確認する（差分なし: exit 0、差分あり: exit 1）
+#
+# Entry（1つの管理対象）:
+#   src    = Store相対のファイルパス
+#   dest   = 配置先パス（~ / ~/... はホームに展開）
+#   target = 省略時 common。--target 未指定時は common のみ、指定時は common + 指定Target が対象
+#
+# コメントを外して使う。まず common の1件から始めるのがおすすめ。
+#
+# [[entries]]
+# src = "vimrc"
+# dest = "~/.vimrc"
+#
+# [[entries]]
+# src = "wezterm.lua"
+# dest = "~/.config/wezterm/wezterm.lua"
+# target = "win"
+#
+# [[entries]]
+# src = "shared.conf"
+# dest = "~/.config/shared.conf"
+# target = ["win", "wsl"]
+`
+
+// Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。
+// 既にあるときは mdots.toml already exists in <dir> 形式のエラーを返す。
+func Init(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(abs, "mdots.toml")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return "", fmt.Errorf("mdots.toml already exists in %s", abs)
+		}
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(Template); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // FindStore はカレント直下の mdots.toml のみを参照し、
 // 見つかった Store ルートを返す。見つからないときは in <cwd> 形式のエラーを返す。
 func FindStore(startDir string) (string, error) {
