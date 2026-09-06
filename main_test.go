@@ -131,10 +131,10 @@ func TestPullMissingDestIsError(t *testing.T) {
 	}
 }
 
-// Store 未発見時の失敗は2コマンド共通。文言自体は設定境界テストが保証する。
+// Store 未発見時の失敗は3コマンド共通。文言自体は設定境界テストが保証する。
 func TestCommandsWithoutStoreFail(t *testing.T) {
 	empty := t.TempDir()
-	for _, args := range [][]string{{"push"}, {"pull"}} {
+	for _, args := range [][]string{{"push"}, {"pull"}, {"diff"}} {
 		if code := run(args, empty); code == 0 {
 			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
 		}

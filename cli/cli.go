@@ -1,8 +1,7 @@
 // Package cli は mdots のコマンド骨格を定義する。
 //
-// CLIフレームワークの最終採用は urfave/cli v3（宣言ツリーで push/pull と
-// --target/--dry-run を定義する）。pflagのみによる自前解析は段階移行の予備案
-// として残すが、既定は v3 とする（spec #24 の Implementation Decisions による）。
+// CLIフレームワークの最終採用は urfave/cli v3（宣言ツリーで push/pull/diff と
+// --target を定義する）。
 //
 // CLI表面（help/version/unknown/usage時の文面・exit）は枠組み既定に寄せる。
 // 内部実行は Executor 委譲とし、エントリは薄く保つ。
@@ -17,13 +16,12 @@ import (
 	cliv3 "github.com/urfave/cli/v3"
 )
 
-// Executor は push/pull/init の内部実行系への委譲口である。
+// Executor は push/pull/diff/init の内部実行系への委譲口である。
 // 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
 type Executor interface {
 	Push(cwd, target string) error
 	Pull(cwd, target string) error
-	PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int
-	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
+	Diff(cwd, target, color string, stdout, stderr io.Writer) int
 	Init(cwd string) error
 }
 
@@ -76,12 +74,7 @@ func targetFlag() cliv3.Flag {
 	return &cliv3.StringFlag{Name: "target", Usage: "対象Target (例: win, wsl)。--target=<name> 形式も可"}
 }
 
-// dryRunFlag は --dry-run の宣言である。
-func dryRunFlag() cliv3.Flag {
-	return &cliv3.BoolFlag{Name: "dry-run", Usage: "実際に書き込まず差分相当を出力する。差分ありは exit 1"}
-}
-
-// colorFlag は --color の宣言である。dry-run の着色制御で auto|always|never を取る。
+// colorFlag は --color の宣言である。diff の着色制御で auto|always|never を取る。
 func colorFlag() cliv3.Flag {
 	return &cliv3.StringFlag{Name: "color", Value: "auto", Usage: "差分の着色 (auto|always|never)"}
 }
@@ -99,7 +92,7 @@ func (r *runner) parseColor(cmd *cliv3.Command) (string, error) {
 }
 
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
-// 枠組み既定に任せ、--target/--dry-run の定義だけを宣言する。
+// 枠組み既定に任せ、--target の定義だけを宣言する。
 // フラグ解釈失敗時（未知フラグ・値なし）は OnUsageError 既定（nil）の
 // Incorrect Usage＋help表示になる。
 func (r *runner) newCommand() *cliv3.Command {
@@ -121,8 +114,6 @@ func (r *runner) newCommand() *cliv3.Command {
 				Usage: "Storeからdestへファイルをコピーする",
 				Flags: []cliv3.Flag{
 					targetFlag(),
-					dryRunFlag(),
-					colorFlag(),
 				},
 				Action: r.pushAction,
 			},
@@ -131,10 +122,17 @@ func (r *runner) newCommand() *cliv3.Command {
 				Usage: "destからStoreへファイルを回収する",
 				Flags: []cliv3.Flag{
 					targetFlag(),
-					dryRunFlag(),
-					colorFlag(),
 				},
 				Action: r.pullAction,
+			},
+			{
+				Name:  "diff",
+				Usage: "Storeとdestの差分をStore→dest方向に出力する",
+				Flags: []cliv3.Flag{
+					targetFlag(),
+					colorFlag(),
+				},
+				Action: r.diffAction,
 			},
 			{
 				Name:   "init",
@@ -177,16 +175,6 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 	if err != nil {
 		return err
 	}
-	if cmd.Bool("dry-run") {
-		color, err := r.parseColor(cmd)
-		if err != nil {
-			return err
-		}
-		if code := r.exec.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
-			return &exitError{code: code}
-		}
-		return nil
-	}
 	if err := r.exec.Push(r.cwd, target); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
@@ -199,19 +187,24 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 	if err != nil {
 		return err
 	}
-	if cmd.Bool("dry-run") {
-		color, err := r.parseColor(cmd)
-		if err != nil {
-			return err
-		}
-		if code := r.exec.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
-			return &exitError{code: code}
-		}
-		return nil
-	}
 	if err := r.exec.Pull(r.cwd, target); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
+	}
+	return nil
+}
+
+func (r *runner) diffAction(_ context.Context, cmd *cliv3.Command) error {
+	target, err := r.targetArgs(cmd)
+	if err != nil {
+		return err
+	}
+	color, err := r.parseColor(cmd)
+	if err != nil {
+		return err
+	}
+	if code := r.exec.Diff(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
+		return &exitError{code: code}
 	}
 	return nil
 }

@@ -44,16 +44,12 @@ func (cliExecutor) Pull(cwd, target string) error { return runPull(cwd, target) 
 
 func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 
-func (cliExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
-	return runPushDryRun(cwd, target, color, stdout, stderr)
-}
-
-func (cliExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
-	return runPullDryRun(cwd, target, color, stdout, stderr)
+func (cliExecutor) Diff(cwd, target, color string, stdout, stderr io.Writer) int {
+	return runDiff(cwd, target, color, stdout, stderr)
 }
 
 // resolveEntries は Store 発見・設定読込・Target フィルタをまとめて行い、
-// push/pull とその dry-run で共有する。
+// push/pull/diff で共有する。
 func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -104,30 +100,18 @@ func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 	return 0
 }
 
-// runDryRun は dry-run 系の共有本体である。欠落時ポリシーの違いは diffFn に寄せ、
-// pushかpullかの分岐は各 action（runPushDryRun/runPullDryRun）の呼び出し側に残す。
-func runDryRun(cwd string, target, color string, stdout, stderr io.Writer, diffFn func(string, []config.Entry, string) (string, bool, error)) int {
+// runDiff は差分を stdout に出し、書き込みは行わない。
+// 差分ありは exit 1、差分なしは exit 0。
+func runDiff(cwd string, target, color string, stdout, stderr io.Writer) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	out, hasDiff, err := diffFn(store, entries, color)
+	out, hasDiff, err := sync.DiffWithColor(store, entries, color)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return emitDiff(stdout, out, hasDiff)
-}
-
-// runPushDryRun は push の差分相当を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
-func runPushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
-	return runDryRun(cwd, target, color, stdout, stderr, sync.DryRunPushWithColor)
-}
-
-// runPullDryRun は pull の差分相当を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
-func runPullDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
-	return runDryRun(cwd, target, color, stdout, stderr, sync.DryRunPullWithColor)
 }
