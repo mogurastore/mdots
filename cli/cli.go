@@ -4,9 +4,9 @@
 // --target/--dry-run を定義する）。pflagのみによる自前解析は段階移行の予備案
 // として残すが、既定は v3 とする（spec #24 の Implementation Decisions による）。
 //
-// CLI表面（help/version/unknown時の文面・--target形式・--dry-run・
-// exitの振る舞い）は凍結値のまま変えない。内部実行は Executor 委譲とし、
-// エントリは薄く保つ。
+// CLI表面（help/version時の文面・exit）は枠組み既定に寄せる。
+// unknown時の文面・exitは凍結値のまま残し（#42で既定化）、
+// 内部実行は Executor 委譲とし、エントリは薄く保つ。
 package cli
 
 import (
@@ -101,29 +101,28 @@ type runner struct {
 func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writer) int {
 	r := &runner{version: version, exec: ex, cwd: cwd, stdout: stdout, stderr: stderr}
 
-	// 先頭トークンの事前振り分け。help/unknown は凍結値のまま保ち、
-	// version は枠組み標準に任せるため事前振り分けしない。
+	// 先頭トークンの事前振り分け。help（--help/-h・引数なし）は枠組み既定に任せるため
+	// 事前振り分けしない。version は枠組み標準に任せるため事前振り分けしない。
 	// push/pull の詳細なフラグ解釈は宣言ツリーに任せる。
-	if len(args) == 0 {
-		fmt.Fprint(stderr, GlobalHelp)
-		return 1
-	}
-	switch args[0] {
-	case "--help", "-h":
-		fmt.Fprint(stdout, GlobalHelp)
-		return 0
-	case "--version", "-v", "-V", "push", "pull", "init":
-		// 宣言ツリーへ進む。--version/-v は標準の version 表示、
-		// -V は標準の未知フラグ扱いになる。
-		// "version" は独自サブコマンドを廃止したため default の未知扱いに落とす。
-	default:
-		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
-		fmt.Fprint(stderr, GlobalHelp)
-		return 1
+	// unknown は凍結値のまま保つ（#42で既定化する）。
+	if len(args) > 0 {
+		switch args[0] {
+		case "--help", "-h", "--version", "-v", "-V", "push", "pull", "init":
+			// 宣言ツリーへ進む。--help/-h・引数なしは既定のhelp表示、
+			// --version/-v は標準の version 表示、
+			// -V は標準の未知フラグ扱いになる。
+			// "version" は独自サブコマンドを廃止したため default の未知扱いに落とす。
+		default:
+			fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
+			fmt.Fprint(stderr, GlobalHelp)
+			return 1
+		}
 	}
 
 	cmd := r.newCommand()
-	r.cmdArgs = args[1:]
+	if len(args) > 0 {
+		r.cmdArgs = args[1:]
+	}
 	if err := cmd.Run(context.Background(), append([]string{"mdots"}, args...)); err != nil {
 		var ee *exitError
 		if errors.As(err, &ee) {
@@ -147,28 +146,25 @@ func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Usage: "実際に書き込まず差分相当を出力する。差分ありは exit 1"}
 }
 
-// newCommand はコマンド宣言ツリーを組み立てる。help文面は凍結値のテンプレートで
-// 上書きし、--target/--dry-run の定義だけをフレームワークに任せる。
+// newCommand はコマンド宣言ツリーを組み立てる。help表示は枠組み既定の
+// テンプレートに任せ、--target/--dry-run の定義だけを宣言する。
 func (r *runner) newCommand() *cliv3.Command {
 	return &cliv3.Command{
 		Name:    "mdots",
 		Usage:   "dotfilesをファイルコピー（非symlink）で管理するCLI。",
 		Version: r.version,
 		// 組み込みの help サブコマンドは表面にないため抑止する。
-		// version 表示は枠組み標準（--version/-v）に任せる。
-		// unknown 時の扱いは Run の事前振り分けが凍結値で行う。
+		// version 表示・help表示は枠組み標準に任せる。
+		// unknown 時の扱いは Run の事前振り分けが凍結値で行う（#42で既定化する）。
 		HideHelpCommand: true,
-		Writer:                        r.stdout,
-		ErrWriter:                     r.stderr,
-		CustomRootCommandHelpTemplate: GlobalHelp,
+		Writer:          r.stdout,
+		ErrWriter:       r.stderr,
 		// 想定外の出力（Incorrect Usage 等）を抑え、文面は自前の凍結値のみにする。
 		ExitErrHandler: func(context.Context, *cliv3.Command, error) {},
-		Action:         r.rootAction,
 		Commands: []*cliv3.Command{
 			{
-				Name:               "push",
-				Usage:              "Storeからdestへファイルをコピーする",
-				CustomHelpTemplate: PushHelp,
+				Name:  "push",
+				Usage: "Storeからdestへファイルをコピーする",
 				Flags: []cliv3.Flag{
 					targetFlag(),
 					dryRunFlag(),
@@ -177,9 +173,8 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action:       r.pushAction,
 			},
 			{
-				Name:               "pull",
-				Usage:              "destからStoreへファイルを回収する",
-				CustomHelpTemplate: PullHelp,
+				Name:  "pull",
+				Usage: "destからStoreへファイルを回収する",
 				Flags: []cliv3.Flag{
 					targetFlag(),
 					dryRunFlag(),
@@ -188,26 +183,13 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action:       r.pullAction,
 			},
 			{
-				Name:               "init",
-				Usage:              "Storeにmdots.toml雛形を作る",
-				CustomHelpTemplate: InitHelp,
-				OnUsageError:       r.usageError(InitHelp),
-				Action:             r.initAction,
+				Name:         "init",
+				Usage:        "Storeにmdots.toml雛形を作る",
+				OnUsageError: r.usageError(InitHelp),
+				Action:       r.initAction,
 			},
 		},
 	}
-}
-
-// rootAction は念のための到達不能ガードである。通常の経路は Run の事前振り分けで
-// 処理されるため、ここに来るのは想定外の呼び出しのみである。
-func (r *runner) rootAction(_ context.Context, cmd *cliv3.Command) error {
-	if cmd.Args().Present() {
-		fmt.Fprintf(r.stderr, "unknown command: %s\n", cmd.Args().First())
-		fmt.Fprint(r.stderr, GlobalHelp)
-		return &exitError{code: 1}
-	}
-	fmt.Fprint(r.stderr, GlobalHelp)
-	return &exitError{code: 1}
 }
 
 // usageError はフラグ解釈失敗時（未知フラグ・--target の値不足）の表面を凍結値で出す。
