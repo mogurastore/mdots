@@ -22,8 +22,8 @@ import (
 type Executor interface {
 	Push(cwd, target string) error
 	Pull(cwd, target string) error
-	PushDryRun(cwd, target string, stdout, stderr io.Writer) int
-	PullDryRun(cwd, target string, stdout, stderr io.Writer) int
+	PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int
+	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
 	Init(cwd string) error
 }
 
@@ -81,6 +81,23 @@ func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Usage: "実際に書き込まず差分相当を出力する。差分ありは exit 1"}
 }
 
+// colorFlag は --color の宣言である。dry-run の着色制御で auto|always|never を取る。
+func colorFlag() cliv3.Flag {
+	return &cliv3.StringFlag{Name: "color", Value: "auto", Usage: "差分の着色 (auto|always|never)"}
+}
+
+// parseColor は --color 値を検証する。不正時は文面を出して exit 用エラーを返す。
+func (r *runner) parseColor(cmd *cliv3.Command) (string, error) {
+	color := cmd.String("color")
+	switch color {
+	case "auto", "always", "never":
+		return color, nil
+	default:
+		fmt.Fprintf(r.stderr, "invalid value for --color: %s (want auto|always|never)\n", color)
+		return "", &exitError{code: 1}
+	}
+}
+
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
 // 枠組み既定に任せ、--target/--dry-run の定義だけを宣言する。
 // フラグ解釈失敗時（未知フラグ・値なし）は OnUsageError 既定（nil）の
@@ -105,6 +122,7 @@ func (r *runner) newCommand() *cliv3.Command {
 				Flags: []cliv3.Flag{
 					targetFlag(),
 					dryRunFlag(),
+					colorFlag(),
 				},
 				Action: r.pushAction,
 			},
@@ -114,6 +132,7 @@ func (r *runner) newCommand() *cliv3.Command {
 				Flags: []cliv3.Flag{
 					targetFlag(),
 					dryRunFlag(),
+					colorFlag(),
 				},
 				Action: r.pullAction,
 			},
@@ -159,7 +178,11 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 		return err
 	}
 	if cmd.Bool("dry-run") {
-		if code := r.exec.PushDryRun(r.cwd, target, r.stdout, r.stderr); code != 0 {
+		color, err := r.parseColor(cmd)
+		if err != nil {
+			return err
+		}
+		if code := r.exec.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
 		return nil
@@ -177,7 +200,11 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		return err
 	}
 	if cmd.Bool("dry-run") {
-		if code := r.exec.PullDryRun(r.cwd, target, r.stdout, r.stderr); code != 0 {
+		color, err := r.parseColor(cmd)
+		if err != nil {
+			return err
+		}
+		if code := r.exec.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
 		return nil

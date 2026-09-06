@@ -44,14 +44,14 @@ func (f *fakeExecutor) Pull(cwd, target string) error {
 	return f.pullErr
 }
 
-func (f *fakeExecutor) PushDryRun(cwd, target string, stdout, stderr io.Writer) int {
+func (f *fakeExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
 	f.pushDryCalls++
 	f.pushTarget = target
 	io.WriteString(stdout, f.pushDryOut)
 	return f.pushDryCode
 }
 
-func (f *fakeExecutor) PullDryRun(cwd, target string, stdout, stderr io.Writer) int {
+func (f *fakeExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
 	f.pullDryCalls++
 	f.pullTarget = target
 	io.WriteString(stdout, f.pullDryOut)
@@ -214,10 +214,10 @@ func TestCliCommandHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run"}},
-		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run"}},
-		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run"}},
-		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run"}},
+		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
 	}
 	for _, tt := range tests {
 		ex := &fakeExecutor{}
@@ -294,6 +294,68 @@ func TestCliPushDryRunDelegatesExitCode(t *testing.T) {
 	if code, _, _ := runCli(t, ex, []string{"push", "--dry-run"}); code != 0 {
 		t.Errorf("Run(push --dry-run) without changes: exit = %d, want 0", code)
 	}
+}
+
+func TestCliDryRunColorFlag(t *testing.T) {
+	t.Run("既定はauto", func(t *testing.T) {
+		ex2 := &recordingExecutor{}
+		if code, _, _ := runCli(t, ex2, []string{"push", "--dry-run"}); code != 0 {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+		if ex2.pushColor != "auto" {
+			t.Errorf("default color = %q, want auto", ex2.pushColor)
+		}
+	})
+
+	t.Run("always/neverを通す", func(t *testing.T) {
+		for _, c := range []string{"always", "never"} {
+			ex := &recordingExecutor{}
+			if code, _, _ := runCli(t, ex, []string{"push", "--dry-run", "--color=" + c}); code != 0 {
+				t.Errorf("Run(push --dry-run --color=%s) exit = %d, want 0", c, code)
+			}
+			if ex.pushColor != c {
+				t.Errorf("color = %q, want %q", ex.pushColor, c)
+			}
+		}
+	})
+
+	t.Run("不正値はexit1", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		if code, _, errOut := runCli(t, ex, []string{"push", "--dry-run", "--color=foo"}); code == 0 {
+			t.Error("exit = 0, want non-zero")
+		} else if !strings.Contains(errOut, "invalid value for --color") {
+			t.Errorf("stderr should contain invalid value, got %q", errOut)
+		}
+		if ex.pushDryCalls != 0 {
+			t.Error("executor must not run on invalid color")
+		}
+	})
+
+	t.Run("dry-runなし時は--colorを無視", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		if code, _, _ := runCli(t, ex, []string{"push", "--color=foo"}); code != 0 {
+			t.Error("non-dry-run must ignore --color")
+		}
+		if ex.pushCalls != 1 {
+			t.Errorf("Push calls = %d, want 1", ex.pushCalls)
+		}
+	})
+}
+
+type recordingExecutor struct {
+	fakeExecutor
+	pushColor string
+	pullColor string
+}
+
+func (f *recordingExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	f.pushColor = color
+	return f.fakeExecutor.PushDryRun(cwd, target, color, stdout, stderr)
+}
+
+func (f *recordingExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	f.pullColor = color
+	return f.fakeExecutor.PullDryRun(cwd, target, color, stdout, stderr)
 }
 
 func TestCliPullDryRunDelegatesExitCode(t *testing.T) {
