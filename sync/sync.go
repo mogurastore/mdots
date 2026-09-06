@@ -98,7 +98,9 @@ func writeNewFileNotice(sb *strings.Builder, srcLabel, destLabel, body string, u
 }
 
 // diffCore は dry-run 系の単一の差分コアである。
-// 両方存在する Entry は go-delta による inline diff を出し、不在の扱いだけを policy で切り替える。
+// 両方存在する Entry は go-delta による inline diff を出す。向きは push が
+// Store→dest、pull が dest→Store で、pull時は引数ごと入れ替えて反転させる。
+// 不在の扱いだけを policy で切り替える。
 func diffCore(storeRoot string, entries []config.Entry, policy missingPolicy, colorMode string) (string, bool, error) {
 	op := policy.opLabel()
 	useColor := resolveUseColor(colorMode)
@@ -150,7 +152,13 @@ func diffCore(storeRoot string, entries []config.Entry, policy missingPolicy, co
 				return "", false, fmt.Errorf("%s %s: Store src is a directory: %s", op, e.Src, srcPath)
 			}
 		}
-		d, same, err := diffContent(srcPath, destPath, e.Src, e.Dest, colorMode)
+		var d string
+		var same bool
+		if policy == policyPullDryRun {
+			d, same, err = diffContent(destPath, srcPath, e.Dest, e.Src, colorMode)
+		} else {
+			d, same, err = diffContent(srcPath, destPath, e.Src, e.Dest, colorMode)
+		}
 		if err != nil {
 			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
 		}

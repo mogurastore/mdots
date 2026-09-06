@@ -33,5 +33,5 @@ Storeにmdots.toml雛形を作る操作。
 _Avoid_: create, new, setup
 
 **dry-run**:
-push/pullの差分相当を書き込まず出力する操作。
+pushはStoreからdestへ、pullはdestからStoreへの適用予定差分を書き込まず出力する操作。
 _Avoid_: diff, preview
