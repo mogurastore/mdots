@@ -77,7 +77,7 @@ func TestCliGlobalHelp(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		for _, want := range []string{"usage:", "push", "pull", "init"} {
+		for _, want := range []string{"USAGE:", "COMMANDS:", "GLOBAL OPTIONS:", "push", "pull", "init"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
@@ -85,14 +85,17 @@ func TestCliGlobalHelp(t *testing.T) {
 	}
 }
 
-func TestCliNoArgsPrintsGlobalHelpToStderr(t *testing.T) {
+func TestCliNoArgsShowsStandardHelp(t *testing.T) {
 	ex := &fakeExecutor{}
-	code, _, errOut := runCli(t, ex, nil)
-	if code != 1 {
-		t.Fatalf("Run(nil) exit = %d, want 1", code)
+	code, out, errOut := runCli(t, ex, nil)
+	if code != 0 {
+		t.Fatalf("Run(nil) exit = %d, want 0", code)
 	}
-	if !strings.Contains(errOut, "usage:") {
-		t.Errorf("stderr should contain usage:, got %q", errOut)
+	if !strings.Contains(out, "USAGE:") {
+		t.Errorf("stdout should contain USAGE:, got %q", out)
+	}
+	if errOut != "" {
+		t.Errorf("stderr should be empty, got %q", errOut)
 	}
 }
 
@@ -116,7 +119,7 @@ func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 		if code == 0 {
 			t.Fatal("Run(-V): exit = 0, want non-zero")
 		}
-		if strings.Contains(out, "v0.0.0-test") {
+		if strings.Contains(out, "mdots version ") {
 			t.Errorf("Run(-V): must not show version, got %q", out)
 		}
 		if !strings.Contains(errOut, "Incorrect Usage") {
@@ -168,9 +171,10 @@ func TestCliCommandHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"push", "--help"}, []string{"push", "--target", "--dry-run"}},
-		{[]string{"push", "-h"}, []string{"push", "--target", "--dry-run"}},
-		{[]string{"pull", "--help"}, []string{"pull", "--target", "--dry-run"}},
+		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run"}},
+		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run"}},
+		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run"}},
+		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run"}},
 	}
 	for _, tt := range tests {
 		ex := &fakeExecutor{}
@@ -296,7 +300,7 @@ func TestCliInitHelp(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		for _, want := range []string{"init", "mdots.toml"} {
+		for _, want := range []string{"USAGE:", "OPTIONS:", "init", "mdots.toml"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
