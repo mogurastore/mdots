@@ -164,7 +164,7 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 # Entry（1つの管理対象）:
 #   src    = Store相対のファイルパス
 #   dest   = 配置先パス（~ / ~/... はホームに展開）
-#   target = 配列で指定（省略時 common）。単一も ["win"] のように書く。--target 未指定時は common のみ、指定時は common + 指定Target が対象
+#   target = 配列で指定（省略時 common）。単一も ["win"] のように書く。複数指定も可（例: ["win", "wsl"]）。--target 未指定時は common のみ、指定時は common + 指定Target が対象
 #
 # コメントを外して使う。まず common の1件から始めるのがおすすめ。
 #
@@ -176,11 +176,6 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 # src = "wezterm.lua"
 # dest = "~/.config/wezterm/wezterm.lua"
 # target = ["win"]
-#
-# [[entries]]
-# src = "shared.conf"
-# dest = "~/.config/shared.conf"
-# target = ["win", "wsl"]
 `
 
 // Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。
