@@ -159,7 +159,7 @@ const Template = `# mdots.toml — Store（このファイルがあるディレ�
 #   mdots push              # common のみを Store から dest へコピー
 #   mdots push --target win # common + win を対象にする
 #   mdots pull --target win # dest から Store へ回収する
-#   mdots diff              # 差分を Store→dest方向に出力する（差分なし: exit 0、差分あり: exit 1）
+#   mdots diff              # 差分を dest→Store方向に出力する（差分なし: exit 0、差分あり: exit 1）
 #
 # Entry（1つの管理対象）:
 #   src    = Store相対のファイルパス

@@ -9,7 +9,7 @@ import (
 )
 
 // Seam: sync パッケージ公開境界 (diff の方向固定)
-// 内容を入れ替えても Store→dest 方向で安定することを検証する。
+// 内容を入れ替えても dest→Store 方向で安定することを検証する。
 func TestDiffDirectionFixed(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
@@ -22,7 +22,7 @@ func TestDiffDirectionFixed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff error: %v", err)
 	}
-	if !strings.Contains(out, "--- a\n") || !strings.Contains(out, "+++ "+dest+"\n") {
-		t.Errorf("diff must be Store->dest headers, got %q", out)
+	if !strings.Contains(out, "--- "+dest+"\n") || !strings.Contains(out, "+++ a\n") {
+		t.Errorf("diff must be dest->Store headers, got %q", out)
 	}
 }

@@ -114,7 +114,8 @@ func diffContent(srcPath, destPath, srcLabel, destLabel string, colorMode string
 	return sb.String(), false, nil
 }
 
-// Diff は Store と dest の差分を Store→dest 方向固定で返す。書き込みは行わない。
+// Diff は Store と dest の差分を dest→Store 方向固定で返す。書き込みは行わない。
+// pushで追加される行が+になるよう dest を old、Store を new とする。
 // 両方存在する Entry は inline diff を出し、片方不在の Entry は新規作成予定として報告する。
 // 両方不在・ディレクトリはエラーで中断する。
 func Diff(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
@@ -126,7 +127,7 @@ func DiffWithColor(storeRoot string, entries []config.Entry, colorMode string) (
 	return diffUnified(storeRoot, entries, colorMode)
 }
 
-// diffUnified は diff 系の単一の差分コアである。向きは常に Store→dest で固定する。
+// diffUnified は diff 系の単一の差分コアである。向きは常に dest→Store で固定する。
 func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
 	const op = "diff"
 	useColor := resolveUseColor(colorMode)
@@ -155,7 +156,7 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 			if destInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 			}
-			writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
+			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Src+" would be created in Store)\n", useColor)
 			hasDiff = true
 			continue
 		}
@@ -163,7 +164,7 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 			if srcInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
 			}
-			writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Dest+" would be created)\n", useColor)
+			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
 			hasDiff = true
 			continue
 		}
@@ -173,7 +174,7 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 		if destInfo.IsDir() {
 			return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 		}
-		d, same, err := diffContent(srcPath, destPath, e.Src, e.Dest, colorMode)
+		d, same, err := diffContent(destPath, srcPath, e.Dest, e.Src, colorMode)
 		if err != nil {
 			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
 		}

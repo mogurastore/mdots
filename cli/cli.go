@@ -127,7 +127,7 @@ func (r *runner) newCommand() *cliv3.Command {
 			},
 			{
 				Name:  "diff",
-				Usage: "Storeとdestの差分をStore→dest方向に出力する",
+				Usage: "Storeとdestの差分をdest→Store方向に出力する",
 				Flags: []cliv3.Flag{
 					targetFlag(),
 					colorFlag(),
