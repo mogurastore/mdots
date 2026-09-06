@@ -69,11 +69,11 @@ func TestDryRunIntegration(t *testing.T) {
 func TestDiffIsRemoved(t *testing.T) {
 	store, _ := setupStoreWithHome(t, nil, nil, "")
 	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"diff"}, store, &out, &errOut); code == 0 {
-		t.Error("run(diff): exit = 0, want non-zero")
+	if code := runWithWriters([]string{"diff"}, store, &out, &errOut); code != 3 {
+		t.Errorf("run(diff): exit = %d, want 3", code)
 	}
-	if !strings.Contains(errOut.String(), "unknown command: diff") {
-		t.Errorf("stderr should contain unknown command: diff, got %q", errOut.String())
+	if !strings.Contains(errOut.String(), "No help topic for 'diff'") {
+		t.Errorf("stderr should contain No help topic for 'diff', got %q", errOut.String())
 	}
 }
 

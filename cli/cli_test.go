@@ -130,14 +130,14 @@ func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 	t.Run("versionは未知コマンド扱い", func(t *testing.T) {
 		ex := &fakeExecutor{}
 		code, out, errOut := runCli(t, ex, []string{"version"})
-		if code == 0 {
-			t.Fatal("Run(version): exit = 0, want non-zero")
+		if code != 3 {
+			t.Fatalf("Run(version): exit = %d, want 3", code)
 		}
 		if strings.Contains(out, "v0.0.0-test") {
 			t.Errorf("Run(version): must not show version, got %q", out)
 		}
-		if !strings.Contains(errOut, "unknown command: version") {
-			t.Errorf("stderr should contain unknown command: version, got %q", errOut)
+		if !strings.Contains(errOut, "No help topic for 'version'") {
+			t.Errorf("stderr should contain No help topic for 'version', got %q", errOut)
 		}
 	})
 }
@@ -145,24 +145,67 @@ func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 func TestCliUnknownCommand(t *testing.T) {
 	ex := &fakeExecutor{}
 	code, _, errOut := runCli(t, ex, []string{"frobnicate"})
-	if code != 1 {
-		t.Fatalf("Run(unknown) exit = %d, want 1", code)
+	if code != 3 {
+		t.Fatalf("Run(unknown) exit = %d, want 3", code)
 	}
-	for _, want := range []string{"unknown command: frobnicate", "usage:"} {
-		if !strings.Contains(errOut, want) {
-			t.Errorf("stderr should contain %q, got %q", want, errOut)
-		}
+	if !strings.Contains(errOut, "No help topic for 'frobnicate'") {
+		t.Errorf("stderr should contain No help topic for 'frobnicate', got %q", errOut)
 	}
 }
 
 func TestCliDiffIsRemoved(t *testing.T) {
 	ex := &fakeExecutor{}
 	code, _, errOut := runCli(t, ex, []string{"diff"})
-	if code == 0 {
-		t.Fatal("Run(diff): exit = 0, want non-zero")
+	if code != 3 {
+		t.Fatalf("Run(diff): exit = %d, want 3", code)
 	}
-	if !strings.Contains(errOut, "unknown command: diff") {
-		t.Errorf("stderr should contain unknown command: diff, got %q", errOut)
+	if !strings.Contains(errOut, "No help topic for 'diff'") {
+		t.Errorf("stderr should contain No help topic for 'diff', got %q", errOut)
+	}
+}
+
+func TestCliStandardUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"push", "--target"},
+		{"pull", "--target"},
+		{"push", "--unknown"},
+		{"pull", "--unknown"},
+	} {
+		ex := &fakeExecutor{}
+		code, out, errOut := runCli(t, ex, args)
+		if code == 0 {
+			t.Errorf("Run(%v): exit = 0, want non-zero", args)
+		}
+		if !strings.Contains(errOut, "Incorrect Usage") {
+			t.Errorf("Run(%v): stderr should contain Incorrect Usage, got %q", args, errOut)
+		}
+		if !strings.Contains(out, "USAGE:") {
+			t.Errorf("Run(%v): stdout should contain USAGE:, got %q", args, out)
+		}
+		if ex.pushCalls+ex.pullCalls+ex.initCalls+ex.pushDryCalls+ex.pullDryCalls != 0 {
+			t.Errorf("Run(%v): executor must not run", args)
+		}
+	}
+}
+
+func TestCliEmptyAndExtraArgsStillRejected(t *testing.T) {
+	for _, args := range [][]string{
+		{"push", "--target="},
+		{"pull", "--target="},
+		{"push", "extra-positional"},
+		{"pull", "extra-positional"},
+		{"init", "extra"},
+		{"push", "--", "--target", "win"},
+		{"pull", "--", "--target", "win"},
+	} {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, args)
+		if code == 0 {
+			t.Errorf("Run(%v): exit = 0, want non-zero", args)
+		}
+		if ex.pushCalls+ex.pullCalls+ex.initCalls+ex.pushDryCalls+ex.pullDryCalls != 0 {
+			t.Errorf("Run(%v): executor must not run", args)
+		}
 	}
 }
 
