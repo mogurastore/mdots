@@ -101,8 +101,8 @@ type runner struct {
 func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writer) int {
 	r := &runner{version: version, exec: ex, cwd: cwd, stdout: stdout, stderr: stderr}
 
-	// 先頭トークンの事前振り分け。従来の自前解析は先頭トークンだけで
-	// help/version/unknown を確定させていたため、その優先順位を凍結値のまま保つ。
+	// 先頭トークンの事前振り分け。help/unknown は凍結値のまま保ち、
+	// version は枠組み標準に任せるため事前振り分けしない。
 	// push/pull の詳細なフラグ解釈は宣言ツリーに任せる。
 	if len(args) == 0 {
 		fmt.Fprint(stderr, GlobalHelp)
@@ -112,11 +112,10 @@ func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writ
 	case "--help", "-h":
 		fmt.Fprint(stdout, GlobalHelp)
 		return 0
-	case "--version", "-V", "version":
-		fmt.Fprintf(stdout, "mdots %s\n", version)
-		return 0
-	case "push", "pull", "init":
-		// 宣言ツリーへ進む。
+	case "--version", "-v", "-V", "push", "pull", "init":
+		// 宣言ツリーへ進む。--version/-v は標準の version 表示、
+		// -V は標準の未知フラグ扱いになる。
+		// "version" は独自サブコマンドを廃止したため default の未知扱いに落とす。
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		fmt.Fprint(stderr, GlobalHelp)
@@ -155,10 +154,10 @@ func (r *runner) newCommand() *cliv3.Command {
 		Name:    "mdots",
 		Usage:   "dotfilesをファイルコピー（非symlink）で管理するCLI。",
 		Version: r.version,
-		// 組み込みの version 表示・help サブコマンドは表面にないため抑止する。
-		// version 表示と unknown 時の扱いは Run の事前振り分けが凍結値で行う。
-		HideVersion:                   true,
-		HideHelpCommand:               true,
+		// 組み込みの help サブコマンドは表面にないため抑止する。
+		// version 表示は枠組み標準（--version/-v）に任せる。
+		// unknown 時の扱いは Run の事前振り分けが凍結値で行う。
+		HideHelpCommand: true,
 		Writer:                        r.stdout,
 		ErrWriter:                     r.stderr,
 		CustomRootCommandHelpTemplate: GlobalHelp,
@@ -194,18 +193,6 @@ func (r *runner) newCommand() *cliv3.Command {
 				CustomHelpTemplate: InitHelp,
 				OnUsageError:       r.usageError(InitHelp),
 				Action:             r.initAction,
-			},
-			{
-				// version サブコマンドの宣言。従来の先頭トークン優先を保つため
-				// Run の事前振り分けが先に処理するが、ツリーの完全性のため宣言を残す。
-				Name:               "version",
-				Usage:              "バージョンを表示する",
-				CustomHelpTemplate: GlobalHelp,
-				SkipFlagParsing:    true,
-				Action: func(context.Context, *cliv3.Command) error {
-					fmt.Fprintf(r.stdout, "mdots %s\n", r.version)
-					return nil
-				},
 			},
 		},
 	}

@@ -97,16 +97,46 @@ func TestCliNoArgsPrintsGlobalHelpToStderr(t *testing.T) {
 }
 
 func TestCliVersion(t *testing.T) {
-	for _, args := range [][]string{{"--version"}, {"-V"}, {"version"}} {
+	for _, args := range [][]string{{"--version"}, {"-v"}} {
 		ex := &fakeExecutor{}
 		code, out, _ := runCli(t, ex, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		if !strings.Contains(out, "v0.0.0-test") {
-			t.Errorf("Run(%v): output should contain version, got %q", args, out)
+		if !strings.Contains(out, "mdots version v0.0.0-test") {
+			t.Errorf("Run(%v): output should contain standard version, got %q", args, out)
 		}
 	}
+}
+
+func TestCliVersionOldFormsAreUnknown(t *testing.T) {
+	t.Run("-Vは標準の未知フラグ扱い", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, out, errOut := runCli(t, ex, []string{"-V"})
+		if code == 0 {
+			t.Fatal("Run(-V): exit = 0, want non-zero")
+		}
+		if strings.Contains(out, "v0.0.0-test") {
+			t.Errorf("Run(-V): must not show version, got %q", out)
+		}
+		if !strings.Contains(errOut, "Incorrect Usage") {
+			t.Errorf("stderr should contain Incorrect Usage, got %q", errOut)
+		}
+	})
+
+	t.Run("versionは未知コマンド扱い", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, out, errOut := runCli(t, ex, []string{"version"})
+		if code == 0 {
+			t.Fatal("Run(version): exit = 0, want non-zero")
+		}
+		if strings.Contains(out, "v0.0.0-test") {
+			t.Errorf("Run(version): must not show version, got %q", out)
+		}
+		if !strings.Contains(errOut, "unknown command: version") {
+			t.Errorf("stderr should contain unknown command: version, got %q", errOut)
+		}
+	})
 }
 
 func TestCliUnknownCommand(t *testing.T) {
