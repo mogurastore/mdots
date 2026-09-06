@@ -159,7 +159,6 @@ func (r *runner) newCommand() *cliv3.Command {
 		// version 表示と unknown 時の扱いは Run の事前振り分けが凍結値で行う。
 		HideVersion:                   true,
 		HideHelpCommand:               true,
-		Suggest:                       false,
 		Writer:                        r.stdout,
 		ErrWriter:                     r.stderr,
 		CustomRootCommandHelpTemplate: GlobalHelp,
@@ -226,7 +225,7 @@ func (r *runner) rootAction(_ context.Context, cmd *cliv3.Command) error {
 
 // usageError はフラグ解釈失敗時（未知フラグ・--target の値不足）の表面を凍結値で出す。
 //
-// なお従来の自前解析との優先順位の違いは残る。--help と不正トークンの併用時はフレームワークの help 優先となり、
+// なお従来の自前解析との優先順位の違いは残る。--help と不正トークンの併用時は help が不正より前にある場合に限り help 優先となり（逆順は usageError）、
 // bare `--` はフラグ区切りとして扱う。いずれも exit 1 である点は従来通り。
 func (r *runner) usageError(commandHelp string) cliv3.OnUsageErrorFunc {
 	return func(_ context.Context, _ *cliv3.Command, err error, _ bool) error {
