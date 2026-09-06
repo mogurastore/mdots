@@ -28,8 +28,8 @@ func TestDiffIntegration(t *testing.T) {
 		if !strings.Contains(out.String(), "---") || !strings.Contains(out.String(), "+++") {
 			t.Errorf("diff output should contain ---/+++, got %q", out.String())
 		}
-		if !strings.Contains(out.String(), "--- vimrc\n") {
-			t.Errorf("diff must be Store->dest fixed, got %q", out.String())
+		if !strings.Contains(out.String(), "+++ vimrc\n") {
+			t.Errorf("diff must be dest->Store fixed, got %q", out.String())
 		}
 		if got, err := os.ReadFile(filepath.Join(home, ".vimrc")); err != nil || string(got) != "old\n" {
 			t.Errorf("dest must NOT be written on diff: content = %q err = %v", got, err)

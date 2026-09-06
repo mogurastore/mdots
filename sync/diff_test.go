@@ -13,7 +13,7 @@ import (
 // Seam: sync パッケージ公開境界 (diff)
 // 実FS上で書き込みなし・差分出力の外部挙動のみを検証する。
 // Store/dest 準備の定型は sync_test.go のヘルパに集約している。
-func TestDiffShowsStoreToDestFixed(t *testing.T) {
+func TestDiffShowsDestToStoreFixed(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
@@ -28,8 +28,12 @@ func TestDiffShowsStoreToDestFixed(t *testing.T) {
 	if !hasDiff {
 		t.Fatal("hasDiff = false, want true")
 	}
-	if !strings.Contains(out, "--- a\n") || !strings.Contains(out, "+++ "+dest+"\n") {
-		t.Errorf("diff must be Store->dest headers, got %q", out)
+	// old=dest / new=Store: pushで追加される行が+になる
+	if !strings.Contains(out, "--- "+dest+"\n") || !strings.Contains(out, "+++ a\n") {
+		t.Errorf("diff must be dest->Store headers, got %q", out)
+	}
+	if !strings.Contains(out, "+ new") {
+		t.Errorf("Store-side addition must render as +, got %q", out)
 	}
 	if got, _ := os.ReadFile(dest); string(got) != "old\n" {
 		t.Errorf("dest must NOT be written: content = %q", got)

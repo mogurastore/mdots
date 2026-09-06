@@ -33,5 +33,5 @@ Storeにmdots.toml雛形を作る操作。
 _Avoid_: create, new, setup
 
 **diff**:
-Storeとdestの差分をStore→dest方向に固定して書き込まず出力する操作。
+Storeとdestの差分をdest→Store方向に固定して書き込まず出力する操作。
 _Avoid_: dry-run, preview
