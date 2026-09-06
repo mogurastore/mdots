@@ -1,0 +1,3 @@
+# pullのdry-run差分をdest→Store方向に反転する
+
+0004では両方存在時にpush/pullが同じunified diffを出すと決めたが、copyが逆向きなのにプレビューが同じではpushで+追加に見えた差分がpullでも+追加に見えて混乱するため、pullの両方存在時は引数ごと入れ替えてdest→Store方向に出すと決めた。欠落・エラー扱いと着色・ハンクは従来通りで、go-deltaへの委譲は変えない。
