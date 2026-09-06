@@ -24,7 +24,7 @@ mise use github:mogurastore/mdots@latest
 Store（管理リポジトリ）の直下に `mdots.toml` を置く。
 `mdots init` でコメント付き雛形を作れる。
 `src` は Store 相対のファイルパス、`dest` は `~` 展開される配置先パス、
-`target` は省略時 common 扱いの文字列配列（例: `["win"]`, `["win", "wsl"]`）。
+`target` は省略時 common 扱いの文字列配列（例: `["win"]`。複数指定も可）。
 
 ```toml
 # <Store>/mdots.toml
@@ -36,11 +36,6 @@ dest = "~/.vimrc"
 src = "wezterm.lua"
 dest = "~/.config/wezterm/wezterm.lua"
 target = ["win"]
-
-[[entries]]
-src = "shared.conf"
-dest = "~/.config/shared.conf"
-target = ["win", "wsl"]
 ```
 
 ```sh
