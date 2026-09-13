@@ -194,6 +194,8 @@ func TestExpandDest(t *testing.T) {
 
 // Seam: config パッケージ公開境界 (init 雛形作成)
 // 空Store作成・既存ありエラー・生成物がLoadを通る外部挙動を検証する。
+// 雛形は新形式（配置先キー・{src}/{targets}排他・単数Target）のみを含み、
+// 旧形式の記法（[[entries]]・dest =・target配列・common特別扱い）を含まない。
 func TestInitCreatesTemplate(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Init(dir)
@@ -205,9 +207,14 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	for _, want := range []string{"mdots push", "src =", "dest =", "target", "common", "[[entries]]"} {
+	for _, want := range []string{"mdots push", "[entries]", "src =", "targets", "target =", `"~/`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("template should contain %q, got:\n%s", want, body)
+		}
+	}
+	for _, old := range []string{"[[entries]]", "dest =", "common", "target = ["} {
+		if strings.Contains(body, old) {
+			t.Errorf("template must not contain old format %q, got:\n%s", old, body)
 		}
 	}
 	if _, err := Load(p); err != nil {
