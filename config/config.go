@@ -196,33 +196,34 @@ func (e Entry) ExpandedDest() (string, error) {
 
 // Template は init が作る mdots.toml 雛形である。
 // 見て使い方を理解できるよう日本語コメントで push/pull と
-// src/dest/target を説明し、サンプル Entry はすべてコメントアウト済み。
+// 配置先キー・{src}/{targets}排他・単数Target・指定なしの意味を説明し、
+// サンプルはすべてコメントアウト済み。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
 const Template = `# mdots.toml — Store（このファイルがあるディレクトリ）直下で mdots を実行する。
 # Store はカレント直下の mdots.toml のみ参照する。サブディレクトリからは実行できない。
 #
 # 使い方:
-#   mdots push              # common のみを Store から dest へコピー
-#   mdots push --target win # common + win を対象にする
-#   mdots pull --target win # dest から Store へ回収する
-#   mdots push --dry-run    # 差分を dest→Store方向に出力する（差分なし: exit 0、差分あり: exit 1）
-#   mdots pull --dry-run    # 差分を Store→dest方向に出力する
+#   mdots push              # 指定なしEntryを Store から配置先へコピー
+#   mdots push --target win # 指定なしEntry＋winに一致したEntryを対象にする
+#   mdots pull --target win # 配置先から Store へ回収する
+#   mdots push --dry-run    # 書き込まず差分を出力する（差分なし: exit 0、差分あり: exit 1）
+#   mdots pull --dry-run    # 書き込まず差分を逆方向に出力する
 #
-# Entry（1つの管理対象）:
-#   src    = Store相対のファイルパス
-#   dest   = 配置先パス（~ / ~/... はホームに展開）
-#   target = 配列で指定（省略時 common）。単一も ["win"] のように書く。複数指定も可（例: ["win", "wsl"]）。--target 未指定時は common のみ、指定時は common + 指定Target が対象
+# [entries] は配置先キー形式で書く。配置先（~ / ~/... はホームに展開）をキーにし、
+# 値は { src = ... } か { targets = [...] } のどちらか一方だけを書く（併記不可）。
+#   src のみ ..... 指定なしEntry。Targetの有無・値に関わらず常に適用される。
+#   targets ...... 一致したTargetの参照元だけが適用される。不一致・無指定時はスキップされる。
+#   target は単数文字列で書く（例: target = "win"）。配列では書けない。
+#   実行順は配置先ソートで固定される（宣言順に依存しない）。
 #
-# コメントを外して使う。まず common の1件から始めるのがおすすめ。
+# コメントを外して使う。まず指定なしの1件から始めるのがおすすめ。
 #
-# [[entries]]
-# src = "vimrc"
-# dest = "~/.vimrc"
+# [entries] は空でも読み込める。以下はすべてコメントアウト済みの例。
 #
-# [[entries]]
-# src = "wezterm.lua"
-# dest = "~/.config/wezterm/wezterm.lua"
-# target = ["win"]
+[entries]
+# "~/.vimrc" = { src = "vimrc" }
+# "~/.config/wezterm/wezterm.lua" = { src = "wezterm.lua" }
+# "~/.gitconfig" = { targets = [{ target = "win", src = "win/.gitconfig" }, { target = "wsl", src = "wsl/.gitconfig" }] }
 `
 
 // Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。
