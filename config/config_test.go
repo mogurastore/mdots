@@ -7,68 +7,71 @@ import (
 	"testing"
 )
 
-// Seam: config パッケージ公開境界 (Target フィルタ)
-// Spec #1 の Target フィルタ仕様を外部挙動として検証する。
-func TestFilterByTarget(t *testing.T) {
-	commonEntry := Entry{Src: "a", Dest: "~/.a"}
-	commonExplicit := Entry{Src: "b", Dest: "~/.b", Target: TargetList{"common"}}
-	winEntry := Entry{Src: "c", Dest: "~/.c", Target: TargetList{"win"}}
-	multiEntry := Entry{Src: "d", Dest: "~/.d", Target: TargetList{"win", "wsl"}}
-	wslEntry := Entry{Src: "e", Dest: "~/.e", Target: TargetList{"wsl"}}
-
-	all := []Entry{commonEntry, commonExplicit, winEntry, multiEntry, wslEntry}
+// Seam: config パッケージ公開境界 (Target 解決)
+// 新形式の解決規則を外部挙動として検証する。
+// 指定なしは常時適用、{targets} は完全一致のみ、不一致・無指定時はスキップ。
+// "common" は普通のTargetとしてのみ一致する。結果は配置先ソート順。
+func TestResolve(t *testing.T) {
+	body := "[entries]\n" +
+		`"~/.c" = { targets = [{ target = "common", src = "c-common" }] }` + "\n" +
+		`"~/.b" = { targets = [{ target = "win", src = "b-win" }, { target = "wsl", src = "b-wsl" }] }` + "\n" +
+		`"~/.a" = { src = "a" }` + "\n"
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
 
 	tests := []struct {
 		name   string
 		target string
-		want   []string
+		want   []Entry
 	}{
-		{"Target未指定はcommonのみ", "", []string{"a", "b"}},
-		{"Target指定winはcommon+win", "win", []string{"a", "b", "c", "d"}},
-		{"Target指定wslはcommon+wsl(配列一致含む)", "wsl", []string{"a", "b", "d", "e"}},
-		{"該当なしTargetはcommonのみ", "linux", []string{"a", "b"}},
-		{"Target指定commonはcommonのみと同等", "common", []string{"a", "b"}},
+		{"無指定は指定なしのみ", "", []Entry{{Src: "a", Dest: "~/.a"}}},
+		{"winは指定なし＋一致のみ", "win", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "b-win", Dest: "~/.b"}}},
+		{"wslは指定なし＋一致のみ", "wsl", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "b-wsl", Dest: "~/.b"}}},
+		{"commonは普通のTargetとして一致のみ", "common", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "c-common", Dest: "~/.c"}}},
+		{"未知Targetは指定なしのみ", "linux", []Entry{{Src: "a", Dest: "~/.a"}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FilterByTarget(all, tt.target)
+			got := cfg.Resolve(tt.target)
 			if len(got) != len(tt.want) {
-				t.Fatalf("FilterByTarget(%q) = %d件, want %d件 (%v)", tt.target, len(got), len(tt.want), tt.want)
+				t.Fatalf("Resolve(%q) = %d件 %+v, want %d件 %+v", tt.target, len(got), got, len(tt.want), tt.want)
 			}
 			for i, w := range tt.want {
-				if got[i].Src != w {
-					t.Errorf("index %d: got Src=%q, want %q", i, got[i].Src, w)
+				if got[i] != w {
+					t.Errorf("index %d: got %+v, want %+v", i, got[i], w)
+				}
+			}
+			// 配置先ソート順の安定性
+			for i := 1; i < len(got); i++ {
+				if got[i-1].Dest >= got[i].Dest {
+					t.Errorf("解決結果が配置先ソート順でない: %+v", got)
+					break
 				}
 			}
 		})
 	}
 }
 
-// Seam: config パッケージ公開境界 (Store の mdots.toml 読込・validation)
-// Entry の src/dest 必須と target の string[] を外部挙動で検証する。
-func TestLoadStoreConfig(t *testing.T) {
-	t.Run("配列のTargetを読み込める", func(t *testing.T) {
+// Seam: config パッケージ公開境界 (新形式の読込)
+// 配置先キー・{src}/{targets}排他・単数Targetの読込を外部挙動で検証する。
+func TestLoadNewFormat(t *testing.T) {
+	t.Run("新形式のサンプルを読み込める", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "mdots.toml")
-		body := "[[entries]]\n" +
-			"src = \"vimrc\"\n" +
-			"dest = \"~/.vimrc\"\n" +
-			"\n" +
-			"[[entries]]\n" +
-			"src = \"wezterm.lua\"\n" +
-			"dest = \"~/.config/wezterm/wezterm.lua\"\n" +
-			"target = [\"win\"]\n" +
-			"\n" +
-			"[[entries]]\n" +
-			"src = \"shared.conf\"\n" +
-			"dest = \"~/.config/shared.conf\"\n" +
-			"target = [\"win\", \"wsl\"]\n" +
-			"\n" +
-			"[[entries]]\n" +
-			"src = \"common.conf\"\n" +
-			"dest = \"~/.config/common.conf\"\n" +
-			"target = [\"common\"]\n"
+		body := "[entries]\n" +
+			`"~/.config/starship.toml" = { src = "dotfiles/.config/starship.toml" }` + "\n" +
+			`"~/.gitconfig" = { targets = [` + "\n" +
+			`  { target = "win", src = "dotfiles/win/.gitconfig" },` + "\n" +
+			`  { target = "wsl", src = "dotfiles/wsl/.gitconfig" },` + "\n" +
+			`] }` + "\n"
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -76,26 +79,64 @@ func TestLoadStoreConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load error: %v", err)
 		}
-		if len(cfg.Entries) != 4 {
-			t.Fatalf("Entries = %d件, want 4件", len(cfg.Entries))
+		if len(cfg.Entries) != 2 {
+			t.Fatalf("Entries = %d件, want 2件", len(cfg.Entries))
 		}
-		if len(cfg.Entries[0].Target) != 0 {
-			t.Errorf("省略Targetはcommon扱い: got %v", cfg.Entries[0].Target)
+		got := cfg.Resolve("win")
+		if len(got) != 2 {
+			t.Fatalf("Resolve(win) = %d件, want 2件 (%+v)", len(got), got)
 		}
-		if len(cfg.Entries[2].Target) != 2 || cfg.Entries[2].Target[0] != "win" {
-			t.Errorf("配列Targetの読み込み不正: got %v", cfg.Entries[2].Target)
+		if got[0].Dest != "~/.config/starship.toml" || got[0].Src != "dotfiles/.config/starship.toml" {
+			t.Errorf("指定なしEntryの解決不正: %+v", got[0])
+		}
+		if got[1].Dest != "~/.gitconfig" || got[1].Src != "dotfiles/win/.gitconfig" {
+			t.Errorf("一致Targetの解決不正: %+v", got[1])
 		}
 	})
 
-	t.Run("src/dest必須のvalidation", func(t *testing.T) {
+	t.Run("宣言順が逆でも解決は配置先ソート順", func(t *testing.T) {
 		dir := t.TempDir()
-		cases := map[string]string{
-			"src欠落":     "[[entries]]\ndest = \"~/.a\"\n",
-			"dest欠落":    "[[entries]]\nsrc = \"a\"\n",
-			"target型不正": "[[entries]]\nsrc = \"a\"\ndest = \"~/.a\"\ntarget = 123\n",
-			"target文字列は不正": "[[entries]]\nsrc = \"a\"\ndest = \"~/.a\"\ntarget = \"win\"\n",
+		p := filepath.Join(dir, "mdots.toml")
+		body := "[entries]\n" +
+			`"~/.z" = { src = "z" }` + "\n" +
+			`"~/.m" = { src = "m" }` + "\n" +
+			`"~/.a" = { src = "a" }` + "\n"
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
 		}
-		for name, body := range cases {
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		got := cfg.Resolve("")
+		want := []string{"~/.a", "~/.m", "~/.z"}
+		if len(got) != len(want) {
+			t.Fatalf("Resolve = %+v, want dest %v", got, want)
+		}
+		for i, w := range want {
+			if got[i].Dest != w {
+				t.Errorf("index %d: got Dest=%q, want %q", i, got[i].Dest, w)
+			}
+		}
+	})
+}
+
+// Seam: config パッケージ公開境界 (検証エラー群)
+// 排他違反・欠落・空・重複を明確に失敗させる外部挙動を検証する。
+func TestLoadValidationErrors(t *testing.T) {
+	cases := map[string]string{
+		"srcとtargetsの併記は拒否": "[entries]\n\"~/.a\" = { src = \"a\", targets = [{ target = \"win\", src = \"b\" }] }\n",
+		"両方なしは拒否":           "[entries]\n\"~/.a\" = {}\n",
+		"空srcは拒否":           "[entries]\n\"~/.a\" = { src = \"\" }\n",
+		"空targets配列は拒否":     "[entries]\n\"~/.a\" = { targets = [] }\n",
+		"空targetは拒否":        "[entries]\n\"~/.a\" = { targets = [{ target = \"\", src = \"a\" }] }\n",
+		"targets要素の空srcは拒否": "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"\" }] }\n",
+		"同一配置先内の重複は拒否":      "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"a\" }, { target = \"win\", src = \"b\" }] }\n",
+		"空destは拒否":          "[entries]\n\"\" = { src = \"a\" }\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
 			p := filepath.Join(dir, "mdots.toml")
 			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 				t.Fatal(err)
@@ -103,8 +144,34 @@ func TestLoadStoreConfig(t *testing.T) {
 			if _, err := Load(p); err == nil {
 				t.Errorf("%s: エラー expected, got nil", name)
 			}
-		}
-	})
+		})
+	}
+}
+
+// Seam: config パッケージ公開境界 (旧形式の明確な失敗)
+// 旧配列形式・旧配列Targetは読めず明確に失敗する外部挙動を検証する。
+func TestLoadRejectsOldFormat(t *testing.T) {
+	cases := map[string]string{
+		"旧[[entries]]配列は拒否": "[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"旧target配列は拒否":      "[entries]\n\"~/.a\" = { src = \"a\", target = [\"win\"] }\n",
+		"旧target文字列は拒否":     "[entries]\n\"~/.a\" = { src = \"a\", target = \"win\" }\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "mdots.toml")
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil {
+				t.Fatalf("%s: エラー expected, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "old") && !strings.Contains(err.Error(), "entries") {
+				t.Errorf("%s: 明確な失敗文言 expected, got %q", name, err.Error())
+			}
+		})
+	}
 }
 
 // Seam: config パッケージ公開境界 (dest の ~ 展開)

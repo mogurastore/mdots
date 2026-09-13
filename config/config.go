@@ -4,105 +4,90 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 // Config は Store 直下の mdots.toml 全体を表す。
+// [entries] は配置先キー化され、値は {src} か {targets} の排他いずれかである。
 type Config struct {
-	Entries []Entry `toml:"entries"`
+	Entries map[string]EntryValue `toml:"entries"`
 }
 
-// Entry は1つの管理対象を表す src/dest ペア。
+// EntryValue は1つの配置先に対する設定値である。
+// Src か Targets のいずれか一方のみを持つ（排他）。
+type EntryValue struct {
+	Src     *string        `toml:"src"`
+	Targets *[]TargetEntry `toml:"targets"`
+}
+
+// TargetEntry は Target ごとの参照元である。Target は単数文字列。
+type TargetEntry struct {
+	Target *string `toml:"target"`
+	Src    *string `toml:"src"`
+}
+
+// Entry は解決済みの1つの管理対象を表す src/dest ペア。
 // src は Store 相対のファイルパス、dest は ~ 展開される配置先パス。
-// Target は適用先を識別する自由文字列の配列。省略時は common として扱う。
-// 単一指定も1要素配列で書く（例: ["win"]）。
 type Entry struct {
-	Src    string     `toml:"src"`
-	Dest   string     `toml:"dest"`
-	Target TargetList `toml:"target,omitempty"`
+	Src  string `toml:"src"`
+	Dest string `toml:"dest"`
 }
 
-// TargetList は string[] を受け付ける Target の集合。
-type TargetList []string
-
-// UnmarshalTOML は string[] のみを受け付ける。単一指定は1要素配列で書く。
-func (t *TargetList) UnmarshalTOML(value interface{}) error {
-	switch v := value.(type) {
-	case nil:
-		*t = nil
-		return nil
-	case []interface{}:
-		out := make(TargetList, 0, len(v))
-		for _, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return fmt.Errorf("target must be string[]")
-			}
-			out = append(out, s)
-		}
-		*t = out
-		return nil
-	case []string:
-		*t = TargetList(v)
-		return nil
-	default:
-		return fmt.Errorf("target must be string[]")
+// sortedDests は配置先キーをソート順で返す。解決・検証の順序を固定する。
+func (c Config) sortedDests() []string {
+	dests := make([]string, 0, len(c.Entries))
+	for dest := range c.Entries {
+		dests = append(dests, dest)
 	}
+	sort.Strings(dests)
+	return dests
 }
 
-// IsCommon は Entry が common (Target 未指定または common) かを返す。
-func (e Entry) IsCommon() bool {
-	if len(e.Target) == 0 {
-		return true
-	}
-	for _, t := range e.Target {
-		if t == "common" {
-			return true
-		}
-	}
-	return false
-}
-
-// MatchesTarget は Entry が指定 Target の対象かを返す。
-// Target 未指定時は common のみ、指定時は common + 指定 Target が対象。
-// Target が配列のときはいずれかが一致すれば対象。
-func (e Entry) MatchesTarget(target string) bool {
-	if target == "" {
-		return e.IsCommon()
-	}
-	if e.IsCommon() {
-		return true
-	}
-	for _, t := range e.Target {
-		if t == target {
-			return true
-		}
-	}
-	return false
-}
-
-// FilterByTarget は Entry 群から指定 Target の対象のみを返す。
-func FilterByTarget(entries []Entry, target string) []Entry {
+// Resolve は指定 Target に対する解決済み Entry 群を配置先ソート順で返す.
+// 指定なし Entry は Target の有無・値に関わらず常に適用される.
+// {targets} は完全一致のみ適用され、不一致・無指定時はスキップされる.
+// "common" は普通のTargetとしてのみ一致する.
+func (c Config) Resolve(target string) []Entry {
+	dests := c.sortedDests()
 	var out []Entry
-	for _, e := range entries {
-		if e.MatchesTarget(target) {
-			out = append(out, e)
+	for _, dest := range dests {
+		v := c.Entries[dest]
+		if v.Src != nil {
+			out = append(out, Entry{Src: *v.Src, Dest: dest})
+			continue
+		}
+		if v.Targets == nil {
+			continue
+		}
+		for _, te := range *v.Targets {
+			if te.Target != nil && *te.Target == target && te.Src != nil {
+				out = append(out, Entry{Src: *te.Src, Dest: dest})
+				break
+			}
 		}
 	}
 	return out
 }
 
 // Load は Store の mdots.toml を読み込み、validation して返す。
+// 旧 [[entries]] 配列形式・旧 target 記法は明確に失敗させる。
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
+	if err := rejectOldFormat(data); err != nil {
+		return Config{}, err
+	}
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
+	}
+	if cfg.Entries == nil {
+		cfg.Entries = map[string]EntryValue{}
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -110,19 +95,80 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// Validate は Entry の src/dest 必須を検証する。
-func (c Config) Validate() error {
-	for i, e := range c.Entries {
-		if e.Src == "" {
-			return fmt.Errorf("entries[%d]: src is required", i)
-		}
-		if e.Dest == "" {
-			return fmt.Errorf("entries[%d]: dest is required", i)
-		}
-		for _, t := range e.Target {
-			if t == "" {
-				return fmt.Errorf("entries[%d]: target must not be empty", i)
+// rejectOldFormat は旧形式を汎用マップで先読みし、明確な失敗文言で拒否する。
+func rejectOldFormat(data []byte) error {
+	var raw map[string]interface{}
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	v, ok := raw["entries"]
+	if !ok || v == nil {
+		return nil
+	}
+	switch entries := v.(type) {
+	case map[string]interface{}:
+		for dest, item := range entries {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("entries[%q]: table expected", dest)
 			}
+			if _, ok := m["target"]; ok {
+				return fmt.Errorf("entries[%q]: old target format is no longer supported (use targets = [{ target = \"...\", src = \"...\" }])", dest)
+			}
+		}
+		return nil
+	case []interface{}:
+		return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
+	case []map[string]interface{}:
+		return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
+	default:
+		// 配列デコードの別表現や想定外の型も旧形式または型不正として扱う。
+		msg := fmt.Sprintf("%T", v)
+		if strings.HasPrefix(msg, "[]") {
+			return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
+		}
+		return fmt.Errorf("entries: table expected")
+	}
+}
+
+// Validate は配置先キー・{src}/{targets} 排他・空・重複を検証する。
+func (c Config) Validate() error {
+	dests := c.sortedDests()
+	for _, dest := range dests {
+		v := c.Entries[dest]
+		if dest == "" {
+			return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+		}
+		hasSrc := v.Src != nil
+		hasTargets := v.Targets != nil
+		if hasSrc && hasTargets {
+			return fmt.Errorf("entries[%q]: src and targets are mutually exclusive", dest)
+		}
+		if !hasSrc && !hasTargets {
+			return fmt.Errorf("entries[%q]: either src or targets is required", dest)
+		}
+		if hasSrc {
+			if *v.Src == "" {
+				return fmt.Errorf("entries[%q]: src is required", dest)
+			}
+			continue
+		}
+		targets := *v.Targets
+		if len(targets) == 0 {
+			return fmt.Errorf("entries[%q]: targets must not be empty", dest)
+		}
+		seen := map[string]struct{}{}
+		for i, te := range targets {
+			if te.Target == nil || *te.Target == "" {
+				return fmt.Errorf("entries[%q].targets[%d]: target must not be empty", dest, i)
+			}
+			if te.Src == nil || *te.Src == "" {
+				return fmt.Errorf("entries[%q].targets[%d]: src is required", dest, i)
+			}
+			if _, dup := seen[*te.Target]; dup {
+				return fmt.Errorf("entries[%q]: duplicate target %q", dest, *te.Target)
+			}
+			seen[*te.Target] = struct{}{}
 		}
 	}
 	return nil

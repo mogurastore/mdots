@@ -52,8 +52,9 @@ func (cliExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Write
 
 func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 
-// resolveEntries は Store 発見・設定読込・Target フィルタをまとめて行い、
-// push/pull で共有する。
+// resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、
+// push/pull で共有する。解決規則は config.Resolve に寄せる
+// （指定なしは常時＋一致Targetのみ、配置先ソート順）。
 func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -63,7 +64,7 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return store, config.FilterByTarget(cfg.Entries, target), nil
+	return store, cfg.Resolve(target), nil
 }
 
 // runCopy は push/pull のコピー系の共有本体である。方向の違いは copyFn に寄せ、
@@ -76,8 +77,8 @@ func runCopy(cwd string, target string, copyFn func(string, []config.Entry) erro
 	return copyFn(store, entries)
 }
 
-// runPush は common + 指定Target の Entry を Store から dest へコピーする。
-// target 未指定時は common のみが対象になる。
+// runPush は指定なし＋指定Target の Entry を Store から dest へコピーする。
+// target 未指定時は指定なし Entry のみが対象になる。
 func runPush(cwd string, target string) error {
 	return runCopy(cwd, target, sync.Push)
 }
@@ -89,8 +90,8 @@ func runInit(cwd string) error {
 	return err
 }
 
-// runPull は common + 指定Target の Entry を dest から Store へ回収する。
-// target 未指定時は common のみが対象になる。
+// runPull は指定なし＋指定Target の Entry を dest から Store へ回収する。
+// target 未指定時は指定なし Entry のみが対象になる。
 func runPull(cwd string, target string) error {
 	return runCopy(cwd, target, sync.Pull)
 }
