@@ -69,20 +69,20 @@ func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writ
 	return 0
 }
 
-// targetFlag は --target の宣言である。--target <name> と --target=<name> の
+// targetFlag は --target/-t の宣言である。--target <name> と --target=<name> の
 // 両形式はフレームワークが解釈する。
 func targetFlag() cliv3.Flag {
-	return &cliv3.StringFlag{Name: "target", Usage: "対象Target (例: win, wsl)。--target=<name> 形式も可"}
+	return &cliv3.StringFlag{Name: "target", Aliases: []string{"t"}, Usage: "対象Target (例: win, wsl)。--target=<name> 形式も可"}
 }
 
-// colorFlag は --color の宣言である。push/pull の dry-run 時の着色制御で auto|always|never を取る。
+// colorFlag は --color/-c の宣言である。push/pull の dry-run 時の着色制御で auto|always|never を取る。
 func colorFlag() cliv3.Flag {
-	return &cliv3.StringFlag{Name: "color", Value: "auto", Usage: "差分の着色 (auto|always|never)"}
+	return &cliv3.StringFlag{Name: "color", Aliases: []string{"c"}, Value: "auto", Usage: "差分の着色 (auto|always|never)"}
 }
 
-// dryRunFlag は --dry-run の宣言である。push/pull で書き込まず差分を出力する。
+// dryRunFlag は --dry-run/-n の宣言である。push/pull で書き込まず差分を出力する。
 func dryRunFlag() cliv3.Flag {
-	return &cliv3.BoolFlag{Name: "dry-run", Usage: "書き込まず差分を出力する"}
+	return &cliv3.BoolFlag{Name: "dry-run", Aliases: []string{"n"}, Usage: "書き込まず差分を出力する"}
 }
 
 // parseColor は --color 値を検証する。不正時は文面を出して exit 用エラーを返す。

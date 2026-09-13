@@ -353,6 +353,69 @@ func TestCliPushDispatchesTarget(t *testing.T) {
 	}
 }
 
+func TestCliShortFlags(t *testing.T) {
+	t.Run("push -t は --target と同じ", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"push", "-t", "win"})
+		if code != 0 {
+			t.Fatalf("Run(push -t win) exit = %d, want 0", code)
+		}
+		if ex.pushCalls != 1 || ex.pushTarget != "win" {
+			t.Errorf("Push calls = %d target = %q, want 1/win", ex.pushCalls, ex.pushTarget)
+		}
+	})
+	t.Run("pull -t は --target と同じ", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"pull", "-t", "win"})
+		if code != 0 {
+			t.Fatalf("Run(pull -t win) exit = %d, want 0", code)
+		}
+		if ex.pullCalls != 1 || ex.pullTarget != "win" {
+			t.Errorf("Pull calls = %d target = %q, want 1/win", ex.pullCalls, ex.pullTarget)
+		}
+	})
+	t.Run("push -n は --dry-run と同じ", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"push", "-n"})
+		if code != 0 {
+			t.Fatalf("Run(push -n) exit = %d, want 0", code)
+		}
+		if ex.pushDryRunCalls != 1 || ex.pushCalls != 0 {
+			t.Errorf("must delegate to PushDryRun only")
+		}
+	})
+	t.Run("pull -n -t の併用", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"pull", "-n", "-t", "win"})
+		if code != 0 {
+			t.Fatalf("Run(pull -n -t win) exit = %d, want 0", code)
+		}
+		if ex.pullDryRunCalls != 1 || ex.pullDryRunTarget != "win" {
+			t.Errorf("PullDryRun calls = %d target = %q, want 1/win", ex.pullDryRunCalls, ex.pullDryRunTarget)
+		}
+	})
+	t.Run("push -n -c は --color と同じ", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"push", "-n", "-c", "always"})
+		if code != 0 {
+			t.Fatalf("Run(push -n -c always) exit = %d, want 0", code)
+		}
+		if ex.pushDryRunCalls != 1 || ex.pushDryRunColor != "always" {
+			t.Errorf("PushDryRun calls = %d color = %q, want 1/always", ex.pushDryRunCalls, ex.pushDryRunColor)
+		}
+	})
+	t.Run("push -c 単独は --dry-run 必須エラー", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"push", "-c", "always"})
+		if code == 0 {
+			t.Fatal("Run(push -c always): exit = 0, want non-zero")
+		}
+		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls != 0 {
+			t.Error("executor must not run")
+		}
+	})
+}
+
 func TestCliTargetFlagErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"push", "--target"},
