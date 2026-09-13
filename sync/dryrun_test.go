@@ -10,10 +10,9 @@ import (
 	"github.com/mogurastore/mdots/config"
 )
 
-// Seam: sync パッケージ公開境界 (diff)
-// 実FS上で書き込みなし・差分出力の外部挙動のみを検証する。
-// Store/dest 準備の定型は sync_test.go のヘルパに集約している。
-func TestDiffShowsDestToStoreFixed(t *testing.T) {
+// Seam: sync パッケージ公開境界 (push/pull dry-run)
+// RED: PushDryRun / PullDryRun は未実装のため失敗する。
+func TestPushDryRunShowsDestToStore(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
@@ -21,35 +20,54 @@ func TestDiffShowsDestToStoreFixed(t *testing.T) {
 	writeTestFile(t, dest, "old\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := DiffWithColor(store, entries, ColorNever)
+	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
-		t.Fatalf("Diff error: %v", err)
+		t.Fatalf("PushDryRun error: %v", err)
 	}
 	if !hasDiff {
 		t.Fatal("hasDiff = false, want true")
 	}
-	// old=dest / new=Store: pushで追加される行が+になる
 	if !strings.Contains(out, "--- "+dest+"\n") || !strings.Contains(out, "+++ a\n") {
-		t.Errorf("diff must be dest->Store headers, got %q", out)
+		t.Errorf("push dry-run must be dest->Store headers, got %q", out)
 	}
 	if !strings.Contains(out, "+ new") {
 		t.Errorf("Store-side addition must render as +, got %q", out)
 	}
-	if got, _ := os.ReadFile(dest); string(got) != "old\n" {
-		t.Errorf("dest must NOT be written: content = %q", got)
+}
+
+func TestPullDryRunShowsStoreToDest(t *testing.T) {
+	store, destRoot := setupSyncDirs(t)
+
+	writeTestFile(t, filepath.Join(store, "a"), "old\n")
+	dest := filepath.Join(destRoot, "a")
+	writeTestFile(t, dest, "new\n")
+	entries := []config.Entry{{Src: "a", Dest: dest}}
+
+	out, hasDiff, err := PullDryRun(store, entries, ColorNever)
+	if err != nil {
+		t.Fatalf("PullDryRun error: %v", err)
+	}
+	if !hasDiff {
+		t.Fatal("hasDiff = false, want true")
+	}
+	if !strings.Contains(out, "--- a\n") || !strings.Contains(out, "+++ "+dest+"\n") {
+		t.Errorf("pull dry-run must be Store->dest headers, got %q", out)
+	}
+	if !strings.Contains(out, "+ new") {
+		t.Errorf("dest-side addition must render as +, got %q", out)
 	}
 }
 
-func TestDiffReportsMissingEitherSideAsNew(t *testing.T) {
-	t.Run("dest不在は新規予定", func(t *testing.T) {
+func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
+	t.Run("push dest不在は新規予定・書き込まない", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "new\n")
 		dest := filepath.Join(destRoot, "a")
 		entries := []config.Entry{{Src: "a", Dest: dest}}
 
-		out, hasDiff, err := Diff(store, entries)
+		out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 		if err != nil {
-			t.Fatalf("Diff error: %v", err)
+			t.Fatalf("PushDryRun error: %v", err)
 		}
 		if !hasDiff || out == "" {
 			t.Fatal("want new-file notice, got empty")
@@ -59,15 +77,15 @@ func TestDiffReportsMissingEitherSideAsNew(t *testing.T) {
 		}
 	})
 
-	t.Run("Store不在は新規回収予定", func(t *testing.T) {
+	t.Run("pull Store不在は新規回収予定・書き込まない", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		dest := filepath.Join(destRoot, "a")
 		writeTestFile(t, dest, "new\n")
 		entries := []config.Entry{{Src: "a", Dest: dest}}
 
-		out, hasDiff, err := Diff(store, entries)
+		out, hasDiff, err := PullDryRun(store, entries, ColorNever)
 		if err != nil {
-			t.Fatalf("Diff error: %v", err)
+			t.Fatalf("PullDryRun error: %v", err)
 		}
 		if !hasDiff || out == "" {
 			t.Fatal("want new-file notice, got empty")
@@ -80,13 +98,16 @@ func TestDiffReportsMissingEitherSideAsNew(t *testing.T) {
 	t.Run("両方不在はエラー", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a")}}
-		if _, _, err := Diff(store, entries); err == nil {
-			t.Error("エラー expected, got nil")
+		if _, _, err := PushDryRun(store, entries, ColorNever); err == nil {
+			t.Error("push: エラー expected, got nil")
+		}
+		if _, _, err := PullDryRun(store, entries, ColorNever); err == nil {
+			t.Error("pull: エラー expected, got nil")
 		}
 	})
 }
 
-func TestDiffNoChange(t *testing.T) {
+func TestDryRunNoChange(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	writeTestFile(t, filepath.Join(store, "a"), "same\n")
@@ -94,16 +115,19 @@ func TestDiffNoChange(t *testing.T) {
 	writeTestFile(t, dest, "same\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := Diff(store, entries)
-	if err != nil {
-		t.Fatalf("Diff error: %v", err)
+	if out, hasDiff, err := PushDryRun(store, entries, ColorNever); err != nil {
+		t.Fatalf("PushDryRun error: %v", err)
+	} else if hasDiff {
+		t.Errorf("push hasDiff = true, want false (out=%q)", out)
 	}
-	if hasDiff {
-		t.Errorf("hasDiff = true, want false (out=%q)", out)
+	if out, hasDiff, err := PullDryRun(store, entries, ColorNever); err != nil {
+		t.Fatalf("PullDryRun error: %v", err)
+	} else if hasDiff {
+		t.Errorf("pull hasDiff = true, want false (out=%q)", out)
 	}
 }
 
-func TestDiffColorNeverHasNoANSI(t *testing.T) {
+func TestDryRunDoesNotWrite(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
@@ -111,22 +135,21 @@ func TestDiffColorNeverHasNoANSI(t *testing.T) {
 	writeTestFile(t, dest, "old\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := DiffWithColor(store, entries, ColorNever)
-	if err != nil {
-		t.Fatalf("DiffWithColor error: %v", err)
+	if _, _, err := PushDryRun(store, entries, ColorNever); err != nil {
+		t.Fatalf("PushDryRun error: %v", err)
 	}
-	if !hasDiff {
-		t.Fatal("hasDiff = false, want true")
+	if got, _ := os.ReadFile(dest); string(got) != "old\n" {
+		t.Errorf("push dry-run must NOT write dest: content = %q", got)
 	}
-	if strings.Contains(out, "\x1b[") {
-		t.Errorf("color=never must not contain ANSI, got %q", out)
+	if _, _, err := PullDryRun(store, entries, ColorNever); err != nil {
+		t.Fatalf("PullDryRun error: %v", err)
 	}
-	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
-		t.Errorf("output should contain ---/+++, got %q", out)
+	if got, _ := os.ReadFile(filepath.Join(store, "a")); string(got) != "new\n" {
+		t.Errorf("pull dry-run must NOT write Store: content = %q", got)
 	}
 }
 
-func TestDiffColorAlwaysHasANSI(t *testing.T) {
+func TestDryRunColorNeverHasNoANSI(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
@@ -134,9 +157,34 @@ func TestDiffColorAlwaysHasANSI(t *testing.T) {
 	writeTestFile(t, dest, "old\n")
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := DiffWithColor(store, entries, ColorAlways)
+	for _, fn := range []func(string, []config.Entry, string) (string, bool, error){PushDryRun, PullDryRun} {
+		out, hasDiff, err := fn(store, entries, ColorNever)
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if !hasDiff {
+			t.Fatal("hasDiff = false, want true")
+		}
+		if strings.Contains(out, "\x1b[") {
+			t.Errorf("color=never must not contain ANSI, got %q", out)
+		}
+		if !strings.Contains(out, "---") || !strings.Contains(out, "+++") {
+			t.Errorf("output should contain ---/+++, got %q", out)
+		}
+	}
+}
+
+func TestDryRunColorAlwaysHasANSI(t *testing.T) {
+	store, destRoot := setupSyncDirs(t)
+
+	writeTestFile(t, filepath.Join(store, "a"), "new\n")
+	dest := filepath.Join(destRoot, "a")
+	writeTestFile(t, dest, "old\n")
+	entries := []config.Entry{{Src: "a", Dest: dest}}
+
+	out, hasDiff, err := PushDryRun(store, entries, ColorAlways)
 	if err != nil {
-		t.Fatalf("DiffWithColor error: %v", err)
+		t.Fatalf("PushDryRun error: %v", err)
 	}
 	if !hasDiff {
 		t.Fatal("hasDiff = false, want true")
@@ -146,7 +194,7 @@ func TestDiffColorAlwaysHasANSI(t *testing.T) {
 	}
 }
 
-func TestDiffLimitsContext(t *testing.T) {
+func TestDryRunLimitsContext(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	var oldBody, newBody strings.Builder
@@ -164,14 +212,13 @@ func TestDiffLimitsContext(t *testing.T) {
 	writeTestFile(t, dest, oldBody.String())
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := DiffWithColor(store, entries, ColorNever)
+	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
-		t.Fatalf("DiffWithColor error: %v", err)
+		t.Fatalf("PushDryRun error: %v", err)
 	}
 	if !hasDiff {
 		t.Fatal("hasDiff = false, want true")
 	}
-	// 前後3行に絞られるため先頭・末尾行は含まれない
 	if strings.Contains(out, "line 1\n") {
 		t.Errorf("context外の line 1 を含むべきでない, got %q", out)
 	}
@@ -183,7 +230,7 @@ func TestDiffLimitsContext(t *testing.T) {
 	}
 }
 
-func TestDiffSplitsHunks(t *testing.T) {
+func TestDryRunSplitsHunks(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
 
 	var oldBody, newBody strings.Builder
@@ -201,14 +248,13 @@ func TestDiffSplitsHunks(t *testing.T) {
 	writeTestFile(t, dest, oldBody.String())
 	entries := []config.Entry{{Src: "a", Dest: dest}}
 
-	out, hasDiff, err := DiffWithColor(store, entries, ColorNever)
+	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
-		t.Fatalf("DiffWithColor error: %v", err)
+		t.Fatalf("PushDryRun error: %v", err)
 	}
 	if !hasDiff {
 		t.Fatal("hasDiff = false, want true")
 	}
-	// 離れた2変更の中間行は省略され、両変更は残る
 	if strings.Contains(out, "line 15\n") {
 		t.Errorf("離れたハンクの中間行を含むべきでない, got %q", out)
 	}

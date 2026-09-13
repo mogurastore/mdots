@@ -32,6 +32,6 @@ _Avoid_: capture, import
 Storeにmdots.toml雛形を作る操作。
 _Avoid_: create, new, setup
 
-**diff**:
-Storeとdestの差分をdest→Store方向に固定して書き込まず出力する操作。
-_Avoid_: dry-run, preview
+**dry-run**:
+push/pullで書き込まず差分を出力する操作。方向は操作のコピー方向に合わせる。
+_Avoid_: diff, preview
