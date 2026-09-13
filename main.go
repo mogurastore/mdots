@@ -42,14 +42,18 @@ func (cliExecutor) Push(cwd, target string) error { return runPush(cwd, target) 
 
 func (cliExecutor) Pull(cwd, target string) error { return runPull(cwd, target) }
 
-func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
-
-func (cliExecutor) Diff(cwd, target, color string, stdout, stderr io.Writer) int {
-	return runDiff(cwd, target, color, stdout, stderr)
+func (cliExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	return runPushDryRun(cwd, target, color, stdout, stderr)
 }
 
+func (cliExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	return runPullDryRun(cwd, target, color, stdout, stderr)
+}
+
+func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
+
 // resolveEntries は Store 発見・設定読込・Target フィルタをまとめて行い、
-// push/pull/diff で共有する。
+// push/pull で共有する。
 func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -100,15 +104,31 @@ func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 	return 0
 }
 
-// runDiff は差分を stdout に出し、書き込みは行わない。
+// runPushDryRun は push の差分を stdout に出し、書き込みは行わない。
 // 差分ありは exit 1、差分なしは exit 0。
-func runDiff(cwd string, target, color string, stdout, stderr io.Writer) int {
+func runPushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	out, hasDiff, err := sync.DiffWithColor(store, entries, color)
+	out, hasDiff, err := sync.PushDryRun(store, entries, color)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return emitDiff(stdout, out, hasDiff)
+}
+
+// runPullDryRun は pull の差分を stdout に出し、書き込みは行わない。
+// 差分ありは exit 1、差分なしは exit 0。
+func runPullDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
+	store, entries, err := resolveEntries(cwd, target)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	out, hasDiff, err := sync.PullDryRun(store, entries, color)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

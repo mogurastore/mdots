@@ -42,7 +42,8 @@ target = ["win"]
 mdots push              # common のみを Store から dest へコピー
 mdots push --target win # common + win を対象にする
 mdots pull --target win # dest から Store へ回収する
-mdots diff              # 差分を dest→Store方向に出力する（差分なし: exit 0、差分あり: exit 1。+はpushで追加される行）
+mdots push --dry-run    # 差分を dest→Store方向に出力する（差分なし: exit 0、差分あり: exit 1。+はpushで追加される行）
+mdots pull --dry-run    # 差分を Store→dest方向に出力する（+はpullで取り込まれる行）
 ```
 
 ## 使い方
@@ -58,13 +59,12 @@ mdots --version         # バージョンを表示する（ldflags -X main.versi
 
 | コマンド | 意味 |
 | --- | --- |
-| `push [--target <name>]` | Store から dest へコピーする |
-| `pull [--target <name>]` | dest から Store へ回収する |
-| `diff [--target <name>] [--color auto\|always\|never]` | Storeとdestの差分をdest→Store方向に出力する |
+| `push [--target <name>] [--dry-run] [--color auto\|always\|never]` | Store から dest へコピーする |
+| `pull [--target <name>] [--dry-run] [--color auto\|always\|never]` | dest から Store へ回収する |
 | `init` | カレント直下に `mdots.toml` 雛形を作る |
 
 - `--target` 未指定時は common のみ、指定時は common + 指定 Target が対象になる。
-- `diff` は実際に書き込まず差分を出力する。差分ありは exit 1、差分なしは exit 0。
+- `--dry-run` は実際に書き込まず差分を出力する。差分ありは exit 1、差分なしは exit 0。方向は操作のコピー方向に合わせる。`--color` 単独はエラーになる。
 - `mdots.toml` が見つからないときは `mdots.toml not found in <cwd>` と表示し exit 1 になる。
 - `init` は雛形を作る。既にあるときは `mdots.toml already exists in <cwd>` と表示し exit 1 になる。
 - Store はカレント直下の `mdots.toml` のみ参照する。Store直下で実行し、サブディレクトリからは実行できない。

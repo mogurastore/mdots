@@ -20,11 +20,17 @@ type fakeExecutor struct {
 	pullCalls  int
 	pullErr    error
 
-	diffCode   int
-	diffOut    string
-	diffCalls  int
-	diffTarget string
-	diffColor  string
+	pushDryRunCode   int
+	pushDryRunOut    string
+	pushDryRunCalls  int
+	pushDryRunTarget string
+	pushDryRunColor  string
+
+	pullDryRunCode   int
+	pullDryRunOut    string
+	pullDryRunCalls  int
+	pullDryRunTarget string
+	pullDryRunColor  string
 
 	initCalls int
 	initErr   error
@@ -42,12 +48,20 @@ func (f *fakeExecutor) Pull(cwd, target string) error {
 	return f.pullErr
 }
 
-func (f *fakeExecutor) Diff(cwd, target, color string, stdout, stderr io.Writer) int {
-	f.diffCalls++
-	f.diffTarget = target
-	f.diffColor = color
-	io.WriteString(stdout, f.diffOut)
-	return f.diffCode
+func (f *fakeExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	f.pushDryRunCalls++
+	f.pushDryRunTarget = target
+	f.pushDryRunColor = color
+	io.WriteString(stdout, f.pushDryRunOut)
+	return f.pushDryRunCode
+}
+
+func (f *fakeExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
+	f.pullDryRunCalls++
+	f.pullDryRunTarget = target
+	f.pullDryRunColor = color
+	io.WriteString(stdout, f.pullDryRunOut)
+	return f.pullDryRunCode
 }
 
 func (f *fakeExecutor) Init(cwd string) error {
@@ -69,10 +83,13 @@ func TestCliGlobalHelp(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		for _, want := range []string{"USAGE:", "COMMANDS:", "GLOBAL OPTIONS:", "push", "pull", "diff", "init"} {
+		for _, want := range []string{"USAGE:", "COMMANDS:", "GLOBAL OPTIONS:", "push", "pull", "init"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
+		}
+		if strings.Contains(out, "diff") {
+			t.Errorf("Run(%v): output must not contain diff, got %q", args, out)
 		}
 	}
 }
@@ -145,46 +162,94 @@ func TestCliUnknownCommand(t *testing.T) {
 	}
 }
 
-func TestCliDiffDispatchesTarget(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"no target", []string{"diff"}, ""},
-		{"space form", []string{"diff", "--target", "win"}, "win"},
-		{"equals form", []string{"diff", "--target=win"}, "win"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ex := &fakeExecutor{}
-			code, _, _ := runCli(t, ex, tt.args)
-			if code != 0 {
-				t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
-			}
-			if ex.diffCalls != 1 {
-				t.Fatalf("Diff calls = %d, want 1", ex.diffCalls)
-			}
-			if ex.diffTarget != tt.want {
-				t.Errorf("Diff target = %q, want %q", ex.diffTarget, tt.want)
-			}
-		})
-	}
-}
-
-func TestCliDryRunFlagsRemoved(t *testing.T) {
-	for _, args := range [][]string{
-		{"push", "--dry-run"},
-		{"pull", "--dry-run"},
-		{"push", "--color=always"},
-		{"pull", "--color=always"},
-	} {
+func TestCliDiffIsRemoved(t *testing.T) {
+	for _, args := range [][]string{{"diff"}, {"diff", "--target", "win"}} {
 		ex := &fakeExecutor{}
 		code, _, _ := runCli(t, ex, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
-		if ex.pushCalls+ex.pullCalls+ex.initCalls+ex.diffCalls != 0 {
+		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
+			t.Errorf("Run(%v): executor must not run", args)
+		}
+	}
+}
+
+func TestCliDryRunDispatchesTarget(t *testing.T) {
+	t.Run("push", func(t *testing.T) {
+		tests := []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"no target", []string{"push", "--dry-run"}, ""},
+			{"space form", []string{"push", "--dry-run", "--target", "win"}, "win"},
+			{"equals form", []string{"push", "--dry-run", "--target=win"}, "win"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ex := &fakeExecutor{}
+				code, _, _ := runCli(t, ex, tt.args)
+				if code != 0 {
+					t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+				}
+				if ex.pushDryRunCalls != 1 {
+					t.Fatalf("PushDryRun calls = %d, want 1", ex.pushDryRunCalls)
+				}
+				if ex.pushDryRunTarget != tt.want {
+					t.Errorf("PushDryRun target = %q, want %q", ex.pushDryRunTarget, tt.want)
+				}
+				if ex.pushCalls != 0 {
+					t.Errorf("Push must not run on dry-run")
+				}
+			})
+		}
+	})
+	t.Run("pull", func(t *testing.T) {
+		tests := []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"no target", []string{"pull", "--dry-run"}, ""},
+			{"space form", []string{"pull", "--dry-run", "--target", "win"}, "win"},
+			{"equals form", []string{"pull", "--dry-run", "--target=win"}, "win"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ex := &fakeExecutor{}
+				code, _, _ := runCli(t, ex, tt.args)
+				if code != 0 {
+					t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+				}
+				if ex.pullDryRunCalls != 1 {
+					t.Fatalf("PullDryRun calls = %d, want 1", ex.pullDryRunCalls)
+				}
+				if ex.pullDryRunTarget != tt.want {
+					t.Errorf("PullDryRun target = %q, want %q", ex.pullDryRunTarget, tt.want)
+				}
+				if ex.pullCalls != 0 {
+					t.Errorf("Pull must not run on dry-run")
+				}
+			})
+		}
+	})
+}
+
+func TestCliColorRequiresDryRun(t *testing.T) {
+	for _, args := range [][]string{
+		{"push", "--color=always"},
+		{"pull", "--color=always"},
+	} {
+		ex := &fakeExecutor{}
+		code, _, errOut := runCli(t, ex, args)
+		if code == 0 {
+			t.Errorf("Run(%v): exit = 0, want non-zero", args)
+		}
+		if !strings.Contains(errOut, "--color requires --dry-run") {
+			t.Errorf("Run(%v): stderr should contain --color requires --dry-run, got %q", args, errOut)
+		}
+		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
 			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
@@ -194,10 +259,8 @@ func TestCliStandardUsageError(t *testing.T) {
 	for _, args := range [][]string{
 		{"push", "--target"},
 		{"pull", "--target"},
-		{"diff", "--target"},
 		{"push", "--unknown"},
 		{"pull", "--unknown"},
-		{"diff", "--unknown"},
 	} {
 		ex := &fakeExecutor{}
 		code, out, errOut := runCli(t, ex, args)
@@ -210,7 +273,7 @@ func TestCliStandardUsageError(t *testing.T) {
 		if !strings.Contains(out, "USAGE:") {
 			t.Errorf("Run(%v): stdout should contain USAGE:, got %q", args, out)
 		}
-		if ex.pushCalls+ex.pullCalls+ex.initCalls+ex.diffCalls != 0 {
+		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
 			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
@@ -220,21 +283,20 @@ func TestCliEmptyAndExtraArgsStillRejected(t *testing.T) {
 	for _, args := range [][]string{
 		{"push", "--target="},
 		{"pull", "--target="},
-		{"diff", "--target="},
 		{"push", "extra-positional"},
 		{"pull", "extra-positional"},
-		{"diff", "extra-positional"},
 		{"init", "extra"},
 		{"push", "--", "--target", "win"},
 		{"pull", "--", "--target", "win"},
-		{"diff", "--", "--target", "win"},
+		{"push", "--dry-run", "extra-positional"},
+		{"pull", "--dry-run", "extra-positional"},
 	} {
 		ex := &fakeExecutor{}
 		code, _, _ := runCli(t, ex, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
-		if ex.pushCalls+ex.pullCalls+ex.initCalls+ex.diffCalls != 0 {
+		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
 			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
@@ -245,12 +307,10 @@ func TestCliCommandHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target"}},
-		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target"}},
-		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target"}},
-		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target"}},
-		{[]string{"diff", "--help"}, []string{"USAGE:", "OPTIONS:", "diff", "--target", "--color"}},
-		{[]string{"diff", "-h"}, []string{"USAGE:", "OPTIONS:", "diff", "--target", "--color"}},
+		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
 	}
 	for _, tt := range tests {
 		ex := &fakeExecutor{}
@@ -262,19 +322,6 @@ func TestCliCommandHelp(t *testing.T) {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", tt.args, want, out)
 			}
-		}
-	}
-}
-
-func TestCliPushPullHelpHasNoDryRun(t *testing.T) {
-	for _, args := range [][]string{{"push", "--help"}, {"pull", "--help"}} {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, args)
-		if code != 0 {
-			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
-		}
-		if strings.Contains(out, "--dry-run") || strings.Contains(out, "--color") {
-			t.Errorf("Run(%v): must not contain dry-run/color, got %q", args, out)
 		}
 	}
 }
@@ -315,10 +362,9 @@ func TestCliTargetFlagErrors(t *testing.T) {
 		{"pull", "--target"},
 		{"pull", "--target="},
 		{"pull", "--unknown"},
-		{"diff", "--target"},
-		{"diff", "--target="},
-		{"diff", "--unknown"},
-		{"diff", "extra-positional"},
+		{"pull", "extra-positional"},
+		{"push", "--dry-run", "--target="},
+		{"pull", "--dry-run", "--target="},
 	} {
 		ex := &fakeExecutor{}
 		if code, _, _ := runCli(t, ex, args); code == 0 {
@@ -327,69 +373,99 @@ func TestCliTargetFlagErrors(t *testing.T) {
 	}
 }
 
-func TestCliDiffDelegatesExitCode(t *testing.T) {
-	ex := &fakeExecutor{diffCode: 1, diffOut: "--- a\n+++ b\n"}
-	code, out, _ := runCli(t, ex, []string{"diff"})
-	if code != 1 {
-		t.Fatalf("Run(diff) exit = %d, want 1", code)
-	}
-	if ex.diffCalls != 1 || ex.pushCalls+ex.pullCalls != 0 {
-		t.Errorf("diff must delegate to Diff only (diff=%d push=%d pull=%d)", ex.diffCalls, ex.pushCalls, ex.pullCalls)
-	}
-	if !strings.Contains(out, "---") {
-		t.Errorf("output should contain diff, got %q", out)
-	}
+func TestCliDryRunDelegatesExitCode(t *testing.T) {
+	t.Run("push", func(t *testing.T) {
+		ex := &fakeExecutor{pushDryRunCode: 1, pushDryRunOut: "--- a\n+++ b\n"}
+		code, out, _ := runCli(t, ex, []string{"push", "--dry-run"})
+		if code != 1 {
+			t.Fatalf("Run(push --dry-run) exit = %d, want 1", code)
+		}
+		if ex.pushDryRunCalls != 1 || ex.pushCalls+ex.pullCalls+ex.pullDryRunCalls != 0 {
+			t.Errorf("must delegate to PushDryRun only")
+		}
+		if !strings.Contains(out, "---") {
+			t.Errorf("output should contain diff, got %q", out)
+		}
 
-	ex = &fakeExecutor{diffCode: 0}
-	if code, _, _ := runCli(t, ex, []string{"diff"}); code != 0 {
-		t.Errorf("Run(diff) without changes: exit = %d, want 0", code)
-	}
+		ex = &fakeExecutor{pushDryRunCode: 0}
+		if code, _, _ := runCli(t, ex, []string{"push", "--dry-run"}); code != 0 {
+			t.Errorf("Run(push --dry-run) without changes: exit = %d, want 0", code)
+		}
+	})
+	t.Run("pull", func(t *testing.T) {
+		ex := &fakeExecutor{pullDryRunCode: 1, pullDryRunOut: "--- a\n+++ b\n"}
+		code, out, _ := runCli(t, ex, []string{"pull", "--dry-run"})
+		if code != 1 {
+			t.Fatalf("Run(pull --dry-run) exit = %d, want 1", code)
+		}
+		if ex.pullDryRunCalls != 1 || ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls != 0 {
+			t.Errorf("must delegate to PullDryRun only")
+		}
+		if !strings.Contains(out, "---") {
+			t.Errorf("output should contain diff, got %q", out)
+		}
+
+		ex = &fakeExecutor{pullDryRunCode: 0}
+		if code, _, _ := runCli(t, ex, []string{"pull", "--dry-run"}); code != 0 {
+			t.Errorf("Run(pull --dry-run) without changes: exit = %d, want 0", code)
+		}
+	})
 }
 
-func TestCliDiffColorFlag(t *testing.T) {
+func TestCliDryRunColorFlag(t *testing.T) {
 	t.Run("既定はauto", func(t *testing.T) {
-		ex2 := &recordingExecutor{}
-		if code, _, _ := runCli(t, ex2, []string{"diff"}); code != 0 {
-			t.Fatalf("exit = %d, want 0", code)
-		}
-		if ex2.diffColor != "auto" {
-			t.Errorf("default color = %q, want auto", ex2.diffColor)
+		for _, args := range [][]string{{"push", "--dry-run"}, {"pull", "--dry-run"}} {
+			ex := &fakeExecutor{}
+			if code, _, _ := runCli(t, ex, args); code != 0 {
+				t.Fatalf("Run(%v) exit = %d, want 0", args, code)
+			}
+			var got string
+			if args[0] == "push" {
+				got = ex.pushDryRunColor
+			} else {
+				got = ex.pullDryRunColor
+			}
+			if got != "auto" {
+				t.Errorf("Run(%v) default color = %q, want auto", args, got)
+			}
 		}
 	})
 
 	t.Run("always/neverを通す", func(t *testing.T) {
 		for _, c := range []string{"always", "never"} {
-			ex := &recordingExecutor{}
-			if code, _, _ := runCli(t, ex, []string{"diff", "--color=" + c}); code != 0 {
-				t.Errorf("Run(diff --color=%s) exit = %d, want 0", c, code)
-			}
-			if ex.diffColor != c {
-				t.Errorf("color = %q, want %q", ex.diffColor, c)
+			for _, base := range []string{"push", "pull"} {
+				ex := &fakeExecutor{}
+				args := []string{base, "--dry-run", "--color=" + c}
+				if code, _, _ := runCli(t, ex, args); code != 0 {
+					t.Errorf("Run(%v) exit = %d, want 0", args, code)
+				}
+				var got string
+				if base == "push" {
+					got = ex.pushDryRunColor
+				} else {
+					got = ex.pullDryRunColor
+				}
+				if got != c {
+					t.Errorf("Run(%v) color = %q, want %q", args, got, c)
+				}
 			}
 		}
 	})
 
 	t.Run("不正値はexit1", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		if code, _, errOut := runCli(t, ex, []string{"diff", "--color=foo"}); code == 0 {
-			t.Error("exit = 0, want non-zero")
-		} else if !strings.Contains(errOut, "invalid value for --color") {
-			t.Errorf("stderr should contain invalid value, got %q", errOut)
-		}
-		if ex.diffCalls != 0 {
-			t.Error("executor must not run on invalid color")
+		for _, base := range []string{"push", "pull"} {
+			ex := &fakeExecutor{}
+			args := []string{base, "--dry-run", "--color=foo"}
+			if code, _, errOut := runCli(t, ex, args); code == 0 {
+				t.Error("exit = 0, want non-zero")
+			} else if !strings.Contains(errOut, "invalid value for --color") {
+				t.Errorf("stderr should contain invalid value, got %q", errOut)
+			}
+			if ex.pushDryRunCalls+ex.pullDryRunCalls != 0 {
+				t.Error("executor must not run on invalid color")
+			}
 		}
 	})
-}
-
-type recordingExecutor struct {
-	fakeExecutor
-	diffColor string
-}
-
-func (f *recordingExecutor) Diff(cwd, target, color string, stdout, stderr io.Writer) int {
-	f.diffColor = color
-	return f.fakeExecutor.Diff(cwd, target, color, stdout, stderr)
 }
 
 func TestCliExecutorErrorExitsNonZero(t *testing.T) {

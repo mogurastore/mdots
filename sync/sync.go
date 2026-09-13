@@ -30,7 +30,7 @@ func Push(storeRoot string, entries []config.Entry) error {
 	return nil
 }
 
-// ColorAuto etc は diff の --color 値を表す。auto は FORCE_COLOR > NO_COLOR > tty 判定。
+// ColorAuto etc は push/pull --dry-run の --color 値を表す。auto は FORCE_COLOR > NO_COLOR > tty 判定。
 const (
 	ColorAuto   = "auto"
 	ColorAlways = "always"
@@ -114,22 +114,23 @@ func diffContent(srcPath, destPath, srcLabel, destLabel string, colorMode string
 	return sb.String(), false, nil
 }
 
-// Diff は Store と dest の差分を dest→Store 方向固定で返す。書き込みは行わない。
+// PushDryRun は push のプレビューを dest→Store 方向で返す。書き込みは行わない。
 // pushで追加される行が+になるよう dest を old、Store を new とする。
 // 両方存在する Entry は inline diff を出し、片方不在の Entry は新規作成予定として報告する。
 // 両方不在・ディレクトリはエラーで中断する。
-func Diff(storeRoot string, entries []config.Entry) (output string, hasDiff bool, err error) {
-	return diffUnified(storeRoot, entries, ColorAuto)
+func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
+	return diffDryRun(storeRoot, entries, colorMode, "push", false)
 }
 
-// DiffWithColor は色指定付きの差分を返す。
-func DiffWithColor(storeRoot string, entries []config.Entry, colorMode string) (output string, hasDiff bool, err error) {
-	return diffUnified(storeRoot, entries, colorMode)
+// PullDryRun は pull のプレビューを Store→dest 方向で返す。書き込みは行わない。
+// pullで取り込まれる行が+になるよう Store を old、dest を new とする。
+func PullDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
+	return diffDryRun(storeRoot, entries, colorMode, "pull", true)
 }
 
-// diffUnified は diff 系の単一の差分コアである。向きは常に dest→Store で固定する。
-func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
-	const op = "diff"
+// diffDryRun は push/pull の差分コアである。isPull=false は dest を old・
+// Store を new とし、true は Store を old・dest を new とする。
+func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op string, isPull bool) (string, bool, error) {
 	useColor := resolveUseColor(colorMode)
 	var sb strings.Builder
 	hasDiff := false
@@ -156,7 +157,11 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 			if destInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 			}
-			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Src+" would be created in Store)\n", useColor)
+			if isPull {
+				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
+			} else {
+				writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Src+" would be created in Store)\n", useColor)
+			}
 			hasDiff = true
 			continue
 		}
@@ -164,7 +169,11 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 			if srcInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
 			}
-			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
+			if isPull {
+				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Dest+" would be created)\n", useColor)
+			} else {
+				writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
+			}
 			hasDiff = true
 			continue
 		}
@@ -174,7 +183,13 @@ func diffUnified(storeRoot string, entries []config.Entry, colorMode string) (st
 		if destInfo.IsDir() {
 			return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 		}
-		d, same, err := diffContent(destPath, srcPath, e.Dest, e.Src, colorMode)
+		var d string
+		var same bool
+		if isPull {
+			d, same, err = diffContent(srcPath, destPath, e.Src, e.Dest, colorMode)
+		} else {
+			d, same, err = diffContent(destPath, srcPath, e.Dest, e.Src, colorMode)
+		}
 		if err != nil {
 			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
 		}
