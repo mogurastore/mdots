@@ -6,6 +6,7 @@ targets:
 dependencies:
   apm:
     - mattpocock/skills
+    - humanlayer/skills/plugins/show-me
   mcp: []
 includes: auto
 scripts: {}

@@ -1,7 +1,22 @@
 lockfile_version: '1'
-generated_at: '2026-09-02T14:05:48.081932+00:00'
-apm_version: 0.29.0
+generated_at: '2026-09-13T12:55:52.231754+00:00'
+apm_version: 0.30.0
 dependencies:
+- repo_url: humanlayer/skills
+  name: show-me
+  host: github.com
+  resolved_commit: 3c2629142c5d437428269b1b722b08c0b87f574d
+  version: 1.0.1
+  virtual_path: plugins/show-me
+  is_virtual: true
+  package_type: skill_bundle
+  deployed_files:
+  - .agents/skills/show-me
+  - .agents/skills/show-me/SKILL.md
+  deployed_file_hashes:
+    .agents/skills/show-me/SKILL.md: sha256:bea6da70a58096730b9aeb0bae293ddf4726103a98efc9ce13c481619942a810
+  content_hash: sha256:033286ec0e8ad575ee8320a2c88e4bc0b506902810f103a0299b43f20bf7df2b
+  declared_license: MIT
 - repo_url: mattpocock/skills
   name: mattpocock-skills
   host: github.com
@@ -717,6 +732,24 @@ deployments:
   - mattpocock/skills
   active_owner: mattpocock/skills
   content_hash: sha256:4f53c9b40ce2651e3611aa090eaedbd6dbc9b71ef8c5f7e65eac0d8263190d0d
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/show-me
+  runtime: null
+  scope: project
+  owners:
+  - humanlayer/skills/plugins/show-me
+  active_owner: humanlayer/skills/plugins/show-me
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/show-me/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - humanlayer/skills/plugins/show-me
+  active_owner: humanlayer/skills/plugins/show-me
+  content_hash: sha256:bea6da70a58096730b9aeb0bae293ddf4726103a98efc9ce13c481619942a810
 - kind: project-relative
   target: agent-skills
   value: .agents/skills/tdd
