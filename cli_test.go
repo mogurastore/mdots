@@ -18,7 +18,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, home := setupStoreWithHome(t,
 			map[string]string{"vimrc": "new\n"},
 			map[string]string{".vimrc": "old\n"},
-			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -43,7 +43,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, home := setupStoreWithHome(t,
 			map[string]string{"vimrc": "old\n"},
 			map[string]string{".vimrc": "new\n"},
-			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -65,7 +65,7 @@ func TestDryRunIntegration(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 		)
 
 		for _, args := range [][]string{{"push", "--dry-run"}, {"pull", "--dry-run"}} {
@@ -75,13 +75,66 @@ func TestDryRunIntegration(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("Target指定で解決結果のみが差分対象になる", func(t *testing.T) {
+		entriesToml := "[entries]\n" +
+			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
+			`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n"
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"common.conf": "same\n", "win.conf": "new\n"},
+			map[string]string{".common.conf": "same\n", ".win.conf": "old\n"},
+			entriesToml,
+		)
+
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"push", "--dry-run", "--target", "win"}, store, &out, &errOut); code == 0 {
+			t.Error("run(push --dry-run --target win) with changes: exit = 0, want non-zero")
+		}
+		if !strings.Contains(out.String(), "win.conf") {
+			t.Errorf("win Entryの差分を含むべき, got %q", out.String())
+		}
+		if strings.Contains(out.String(), "common.conf") {
+			t.Errorf("差分なしの指定なしEntryを含めるべきでない, got %q", out.String())
+		}
+
+		out.Reset()
+		errOut.Reset()
+		if code := runWithWriters([]string{"push", "--dry-run", "--target", "linux"}, store, &out, &errOut); code != 0 {
+			t.Errorf("run(push --dry-run --target linux) without applicable diff: exit = %d, want 0 (out=%q)", code, out.String())
+		}
+	})
+
+	t.Run("pullのTarget指定でも解決結果のみが差分対象になる", func(t *testing.T) {
+		entriesToml := "[entries]\n" +
+			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
+			`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n"
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
+			map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
+			entriesToml,
+		)
+
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"pull", "--dry-run", "--target", "win"}, store, &out, &errOut); code == 0 {
+			t.Error("run(pull --dry-run --target win) with changes: exit = 0, want non-zero")
+		}
+		if !strings.Contains(out.String(), "win.conf") {
+			t.Errorf("win Entryの差分を含むべき, got %q", out.String())
+		}
+
+		out.Reset()
+		errOut.Reset()
+		if code := runWithWriters([]string{"pull", "--dry-run", "--target", "linux"}, store, &out, &errOut); code != 0 {
+			t.Errorf("run(pull --dry-run --target linux) without applicable diff: exit = %d, want 0 (out=%q)", code, out.String())
+		}
+	})
 }
 
 func TestColorRequiresDryRun(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		map[string]string{"vimrc": "same\n"},
 		map[string]string{".vimrc": "same\n"},
-		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
 	for _, args := range [][]string{{"push", "--color=always"}, {"pull", "--color=always"}} {
 		var out, errOut bytes.Buffer

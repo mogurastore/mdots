@@ -38,7 +38,7 @@ func TestPushEndToEnd(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "set number\n"},
 		nil,
-		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
 
 	if code := run([]string{"push"}, store); code != 0 {
@@ -54,37 +54,142 @@ func TestPushEndToEnd(t *testing.T) {
 }
 
 // Target 配線の代表例。展開パターン自体は設定境界テストが保証する。
+// 新形式の解決結果で push が動くこと、無指定・指定・未知Targetの
+// 振る舞いを実FS上の外部挙動で確認する。
 func TestPushWithTargetRepresentative(t *testing.T) {
-	store, home := setupStoreWithHome(t,
-		map[string]string{
-			"common.conf": "common\n",
-			"win.conf":    "win\n",
-			"wsl.conf":    "wsl\n",
-		},
-		nil,
-		"[[entries]]\nsrc = \"common.conf\"\ndest = \"~/.common.conf\"\n"+
-			"[[entries]]\nsrc = \"win.conf\"\ndest = \"~/.win.conf\"\ntarget = [\"win\"]\n"+
-			"[[entries]]\nsrc = \"wsl.conf\"\ndest = \"~/.wsl.conf\"\ntarget = [\"wsl\"]\n",
-	)
+	entriesToml := "[entries]\n" +
+		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
+		`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n" +
+		`"~/.wsl.conf" = { targets = [{ target = "wsl", src = "wsl.conf" }] }` + "\n"
+	storeFiles := map[string]string{
+		"common.conf": "common\n",
+		"win.conf":    "win\n",
+		"wsl.conf":    "wsl\n",
+	}
 
-	if code := run([]string{"push", "--target", "win"}, store); code != 0 {
-		t.Fatalf("run(push --target win) exit = %d, want 0", code)
-	}
-	for _, f := range []string{".common.conf", ".win.conf"} {
-		if _, err := os.Stat(filepath.Join(home, f)); err != nil {
-			t.Errorf("%s should be copied: %v", f, err)
+	t.Run("無指定は指定なしのみ", func(t *testing.T) {
+		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+
+		if code := run([]string{"push"}, store); code != 0 {
+			t.Fatalf("run(push) exit = %d, want 0", code)
 		}
+		if _, err := os.Stat(filepath.Join(home, ".common.conf")); err != nil {
+			t.Errorf(".common.conf should be copied: %v", err)
+		}
+		for _, f := range []string{".win.conf", ".wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(home, f)); err == nil {
+				t.Errorf("%s should NOT be copied without --target", f)
+			}
+		}
+	})
+
+	t.Run("指定は指定なし＋一致のみ", func(t *testing.T) {
+		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+
+		if code := run([]string{"push", "--target", "win"}, store); code != 0 {
+			t.Fatalf("run(push --target win) exit = %d, want 0", code)
+		}
+		for _, f := range []string{".common.conf", ".win.conf"} {
+			if _, err := os.Stat(filepath.Join(home, f)); err != nil {
+				t.Errorf("%s should be copied: %v", f, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(home, ".wsl.conf")); err == nil {
+			t.Error(".wsl.conf should NOT be copied with --target win")
+		}
+	})
+
+	t.Run("未知Targetは指定なしのみ", func(t *testing.T) {
+		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+
+		if code := run([]string{"push", "--target", "linux"}, store); code != 0 {
+			t.Fatalf("run(push --target linux) exit = %d, want 0", code)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".common.conf")); err != nil {
+			t.Errorf(".common.conf should be copied: %v", err)
+		}
+		for _, f := range []string{".win.conf", ".wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(home, f)); err == nil {
+				t.Errorf("%s should NOT be copied with unknown target", f)
+			}
+		}
+	})
+}
+
+// pull も新形式の解決結果で動くことの代表例。指定なし＋一致のみが回収され、
+// 不一致・無指定時のスキップを確認する。
+func TestPullWithTargetRepresentative(t *testing.T) {
+	entriesToml := "[entries]\n" +
+		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
+		`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n" +
+		`"~/.wsl.conf" = { targets = [{ target = "wsl", src = "wsl.conf" }] }` + "\n"
+	homeFiles := map[string]string{
+		".common.conf": "common edited\n",
+		".win.conf":    "win edited\n",
+		".wsl.conf":    "wsl edited\n",
 	}
-	if _, err := os.Stat(filepath.Join(home, ".wsl.conf")); err == nil {
-		t.Error(".wsl.conf should NOT be copied with --target win")
-	}
+
+	t.Run("指定は指定なし＋一致のみ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
+
+		if code := run([]string{"pull", "--target", "win"}, store); code != 0 {
+			t.Fatalf("run(pull --target win) exit = %d, want 0", code)
+		}
+		for _, tc := range []struct{ name, want string }{
+			{"common.conf", "common edited\n"},
+			{"win.conf", "win edited\n"},
+		} {
+			got, err := os.ReadFile(filepath.Join(store, tc.name))
+			if err != nil {
+				t.Fatalf("store read error %s: %v", tc.name, err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("store %s content = %q, want %q", tc.name, got, tc.want)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(store, "wsl.conf")); err == nil {
+			t.Error("wsl.conf should NOT be pulled with --target win")
+		}
+	})
+
+	t.Run("無指定は指定なしのみ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
+
+		if code := run([]string{"pull"}, store); code != 0 {
+			t.Fatalf("run(pull) exit = %d, want 0", code)
+		}
+		if _, err := os.Stat(filepath.Join(store, "common.conf")); err != nil {
+			t.Errorf("common.conf should be pulled: %v", err)
+		}
+		for _, f := range []string{"win.conf", "wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(store, f)); err == nil {
+				t.Errorf("%s should NOT be pulled without --target", f)
+			}
+		}
+	})
+
+	t.Run("未知Targetは指定なしのみ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
+
+		if code := run([]string{"pull", "--target", "linux"}, store); code != 0 {
+			t.Fatalf("run(pull --target linux) exit = %d, want 0", code)
+		}
+		if _, err := os.Stat(filepath.Join(store, "common.conf")); err != nil {
+			t.Errorf("common.conf should be pulled: %v", err)
+		}
+		for _, f := range []string{"win.conf", "wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(store, f)); err == nil {
+				t.Errorf("%s should NOT be pulled with unknown target", f)
+			}
+		}
+	})
 }
 
 func TestPushFromSubdirFails(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "x\n"},
 		nil,
-		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
 	sub := filepath.Join(store, "a", "b")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -103,7 +208,7 @@ func TestPullEndToEnd(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "edited\n"},
-		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
 
 	if code := run([]string{"pull"}, store); code != 0 {
@@ -123,7 +228,7 @@ func TestPullMissingDestIsError(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		nil,
-		"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
 
 	if code := run([]string{"pull"}, store); code == 0 {
