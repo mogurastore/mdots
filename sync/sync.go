@@ -154,26 +154,24 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
 		}
 		if srcMissing {
+			if !isPull {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, srcErr)
+			}
 			if destInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 			}
-			if isPull {
-				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
-			} else {
-				writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Src+" would be created in Store)\n", useColor)
-			}
+			writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
 			hasDiff = true
 			continue
 		}
 		if destMissing {
+			if isPull {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, destErr)
+			}
 			if srcInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
 			}
-			if isPull {
-				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Dest+" would be created)\n", useColor)
-			} else {
-				writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
-			}
+			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
 			hasDiff = true
 			continue
 		}
