@@ -73,6 +73,9 @@ func TestDryRunIntegration(t *testing.T) {
 			if code := runWithWriters(args, store, &out, &errOut); code != 0 {
 				t.Errorf("run(%v) without changes: exit = %d, want 0", args, code)
 			}
+			if out.String() != "No changes.\n" {
+				t.Errorf("run(%v) without changes: stdout = %q, want %q", args, out.String(), "No changes.\n")
+			}
 		}
 	})
 
