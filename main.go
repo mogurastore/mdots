@@ -96,12 +96,13 @@ func runPull(cwd string, target string) error {
 	return runCopy(cwd, target, sync.Pull)
 }
 
-// emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは 0。
+// emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは No changes. を出して 0。
 func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 	if hasDiff {
 		fmt.Fprint(stdout, out)
 		return 1
 	}
+	fmt.Fprintln(stdout, "No changes.")
 	return 0
 }
 
