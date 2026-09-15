@@ -1,0 +1,3 @@
+# dry-runの欠落報告を操作のコピー方向に合わせる
+
+0009でdiff資産として「欠落は両側とも新規報告」を引き継いだが、方向ありのpush/pull --dry-runでは実コピーと乖離するため改める。push dry-runはdest欠落のみ新規作成予定とし、Store欠落は実Pushと同様エラーにする。pull dry-runはStore欠落のみ新規回収予定とし、dest欠落は実Pullと同様エラーにする。両方不在は従来通りエラーで、Issue #71（存在しないdestのpullがnew file報告になる）を修正するため。0008の両側新規は方向なしdiffの資産として残し、0009の該当部分をsupersedeする。

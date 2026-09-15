@@ -105,6 +105,25 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 			t.Error("pull: エラー expected, got nil")
 		}
 	})
+
+	t.Run("push Store不在はエラー", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "exists\n")
+		entries := []config.Entry{{Src: "a", Dest: dest}}
+		if _, _, err := PushDryRun(store, entries, ColorNever); err == nil {
+			t.Error("push srcMissing: エラー expected, got nil")
+		}
+	})
+
+	t.Run("pull dest不在はエラー", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "exists\n")
+		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a")}}
+		if _, _, err := PullDryRun(store, entries, ColorNever); err == nil {
+			t.Error("pull destMissing: エラー expected, got nil")
+		}
+	})
 }
 
 func TestDryRunNoChange(t *testing.T) {
