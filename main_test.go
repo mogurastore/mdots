@@ -59,8 +59,8 @@ func TestPushEndToEnd(t *testing.T) {
 func TestPushWithTargetRepresentative(t *testing.T) {
 	entriesToml := "[entries]\n" +
 		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-		`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n" +
-		`"~/.wsl.conf" = { targets = [{ target = "wsl", src = "wsl.conf" }] }` + "\n"
+		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n" +
+		`"~/.wsl.conf" = { targets = { wsl = { src = "wsl.conf" } } }` + "\n"
 	storeFiles := map[string]string{
 		"common.conf": "common\n",
 		"win.conf":    "win\n",
@@ -121,8 +121,8 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 func TestPullWithTargetRepresentative(t *testing.T) {
 	entriesToml := "[entries]\n" +
 		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-		`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n" +
-		`"~/.wsl.conf" = { targets = [{ target = "wsl", src = "wsl.conf" }] }` + "\n"
+		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n" +
+		`"~/.wsl.conf" = { targets = { wsl = { src = "wsl.conf" } } }` + "\n"
 	homeFiles := map[string]string{
 		".common.conf": "common edited\n",
 		".win.conf":    "win edited\n",

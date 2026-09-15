@@ -82,7 +82,7 @@ func TestDryRunIntegration(t *testing.T) {
 	t.Run("Target指定で解決結果のみが差分対象になる", func(t *testing.T) {
 		entriesToml := "[entries]\n" +
 			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-			`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n"
+			`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"common.conf": "same\n", "win.conf": "new\n"},
 			map[string]string{".common.conf": "same\n", ".win.conf": "old\n"},
@@ -110,7 +110,7 @@ func TestDryRunIntegration(t *testing.T) {
 	t.Run("pullのTarget指定でも解決結果のみが差分対象になる", func(t *testing.T) {
 		entriesToml := "[entries]\n" +
 			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-			`"~/.win.conf" = { targets = [{ target = "win", src = "win.conf" }] }` + "\n"
+			`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
 			map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},

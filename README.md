@@ -27,10 +27,10 @@ mdots init
 # mdots.toml を編集する（配置先をキーにする）
 # "~/.vimrc" = { src = "vimrc" }
 # "~/.gitconfig" = {
-#   targets = [
-#     { target = "win", src = "win/.gitconfig" },
-#     { target = "wsl", src = "wsl/.gitconfig" },
-#   ],
+#   targets = {
+#     win = { src = "win/.gitconfig" },
+#     wsl = { src = "wsl/.gitconfig" },
+#   },
 # }
 
 # ファイルをコピー
