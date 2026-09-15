@@ -19,14 +19,13 @@ type Config struct {
 // EntryValue は1つの配置先に対する設定値である。
 // Src か Targets のいずれか一方のみを持つ（排他）。
 type EntryValue struct {
-	Src     *string        `toml:"src"`
-	Targets *[]TargetEntry `toml:"targets"`
+	Src     *string                 `toml:"src"`
+	Targets *map[string]TargetValue `toml:"targets"`
 }
 
-// TargetEntry は Target ごとの参照元である。Target は単数文字列。
-type TargetEntry struct {
-	Target *string `toml:"target"`
-	Src    *string `toml:"src"`
+// TargetValue は Target キーごとの参照元である。Target はマップキー（単数文字列）。
+type TargetValue struct {
+	Src *string `toml:"src"`
 }
 
 // Entry は解決済みの1つの管理対象を表す src/dest ペア。
@@ -62,11 +61,8 @@ func (c Config) Resolve(target string) []Entry {
 		if v.Targets == nil {
 			continue
 		}
-		for _, te := range *v.Targets {
-			if te.Target != nil && *te.Target == target && te.Src != nil {
-				out = append(out, Entry{Src: *te.Src, Dest: dest})
-				break
-			}
+		if tv, ok := (*v.Targets)[target]; ok && tv.Src != nil {
+			out = append(out, Entry{Src: *tv.Src, Dest: dest})
 		}
 	}
 	return out
@@ -96,6 +92,8 @@ func Load(path string) (Config, error) {
 }
 
 // rejectOldFormat は旧形式を汎用マップで先読みし、明確な失敗文言で拒否する。
+// 旧 [[entries]] 配列・旧 target 記法・旧 targets 配列を拒否し、
+// 新 targets マップ値の未知フィールドもここで厳密に拒否する。
 func rejectOldFormat(data []byte) error {
 	var raw map[string]interface{}
 	if err := toml.Unmarshal(data, &raw); err != nil {
@@ -107,13 +105,43 @@ func rejectOldFormat(data []byte) error {
 	}
 	switch entries := v.(type) {
 	case map[string]interface{}:
-		for dest, item := range entries {
+		for _, dest := range sortedKeys(entries) {
+			item := entries[dest]
 			m, ok := item.(map[string]interface{})
 			if !ok {
 				return fmt.Errorf("entries[%q]: table expected", dest)
 			}
 			if _, ok := m["target"]; ok {
-				return fmt.Errorf("entries[%q]: old target format is no longer supported (use targets = [{ target = \"...\", src = \"...\" }])", dest)
+				return fmt.Errorf("entries[%q]: old target format is no longer supported (use targets = { win = { src = \"...\" } })", dest)
+			}
+			tv, ok := m["targets"]
+			if !ok || tv == nil {
+				continue
+			}
+			switch targets := tv.(type) {
+			case map[string]interface{}:
+				for _, tname := range sortedKeys(targets) {
+					titem := targets[tname]
+					tm, ok := titem.(map[string]interface{})
+					if !ok {
+						return fmt.Errorf("entries[%q].targets[%q]: table expected", dest, tname)
+					}
+					for field := range tm {
+						if field != "src" {
+							return fmt.Errorf("entries[%q].targets[%q]: unknown field %q", dest, tname, field)
+						}
+					}
+				}
+			case []interface{}:
+				return oldTargetsArrayError(dest)
+			case []map[string]interface{}:
+				return oldTargetsArrayError(dest)
+			default:
+				msg := fmt.Sprintf("%T", tv)
+				if strings.HasPrefix(msg, "[]") {
+					return oldTargetsArrayError(dest)
+				}
+				return fmt.Errorf("entries[%q]: targets must be a table", dest)
 			}
 		}
 		return nil
@@ -131,7 +159,13 @@ func rejectOldFormat(data []byte) error {
 	}
 }
 
-// Validate は配置先キー・{src}/{targets} 排他・空・重複を検証する。
+// oldTargetsArrayError は旧 targets 配列形式に対する明確な失敗文言を返す。
+func oldTargetsArrayError(dest string) error {
+	return fmt.Errorf("entries[%q]: old targets array format is no longer supported (use targets = { win = { src = \"...\" } })", dest)
+}
+
+// Validate は配置先キー・{src}/{targets} 排他・空を検証する。
+// 重複TargetはTOMLキー重複として構造上不可能なため検証しない。
 func (c Config) Validate() error {
 	dests := c.sortedDests()
 	for _, dest := range dests {
@@ -157,21 +191,26 @@ func (c Config) Validate() error {
 		if len(targets) == 0 {
 			return fmt.Errorf("entries[%q]: targets must not be empty", dest)
 		}
-		seen := map[string]struct{}{}
-		for i, te := range targets {
-			if te.Target == nil || *te.Target == "" {
-				return fmt.Errorf("entries[%q].targets[%d]: target must not be empty", dest, i)
+		for _, tname := range sortedKeys(targets) {
+			tv := targets[tname]
+			if tname == "" {
+				return fmt.Errorf("entries[%q]: target must not be empty", dest)
 			}
-			if te.Src == nil || *te.Src == "" {
-				return fmt.Errorf("entries[%q].targets[%d]: src is required", dest, i)
+			if tv.Src == nil || *tv.Src == "" {
+				return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, tname)
 			}
-			if _, dup := seen[*te.Target]; dup {
-				return fmt.Errorf("entries[%q]: duplicate target %q", dest, *te.Target)
-			}
-			seen[*te.Target] = struct{}{}
 		}
 	}
 	return nil
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // ExpandDest は Entry の dest の ~ / ~/ を os.UserHomeDir() で展開する。
@@ -195,24 +234,15 @@ func (e Entry) ExpandedDest() (string, error) {
 }
 
 // Template は init が作る mdots.toml 雛形である。
-// 日本語コメントで最小の使い方と配置先キー形式のみ説明し、
-// 詳細は README / --help に委譲する。
 // サンプルはすべてコメントアウト済み。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
-const Template = `# mdots.toml — Store直下で実行する。詳細は README / mdots --help。
-# 使い方:
-#   mdots push --target win / mdots pull --target win / mdots push --dry-run
-#
-# [entries] は配置先キー形式。値は { src } か { targets } のどちらか一方。
-# srcのみは常に適用、targetsは一致したTargetのみ適用（targetは単数文字列）。
-#
-[entries]
+const Template = `[entries]
 # "~/.vimrc" = { src = "vimrc" }
 # "~/.gitconfig" = {
-#   targets = [
-#     { target = "win", src = "win/.gitconfig" },
-#     { target = "wsl", src = "wsl/.gitconfig" },
-#   ],
+#   targets = {
+#     win = { src = "win/.gitconfig" },
+#     wsl = { src = "wsl/.gitconfig" },
+#   },
 # }
 `
 

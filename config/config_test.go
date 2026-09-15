@@ -13,8 +13,8 @@ import (
 // "common" は普通のTargetとしてのみ一致する。結果は配置先ソート順。
 func TestResolve(t *testing.T) {
 	body := "[entries]\n" +
-		`"~/.c" = { targets = [{ target = "common", src = "c-common" }] }` + "\n" +
-		`"~/.b" = { targets = [{ target = "win", src = "b-win" }, { target = "wsl", src = "b-wsl" }] }` + "\n" +
+		`"~/.c" = { targets = { common = { src = "c-common" } } }` + "\n" +
+		`"~/.b" = { targets = { win = { src = "b-win" }, wsl = { src = "b-wsl" } } }` + "\n" +
 		`"~/.a" = { src = "a" }` + "\n"
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
@@ -61,17 +61,14 @@ func TestResolve(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (新形式の読込)
-// 配置先キー・{src}/{targets}排他・単数Targetの読込を外部挙動で検証する。
+// 配置先キー・{src}/{targets}排他・Targetキー化の読込を外部挙動で検証する。
 func TestLoadNewFormat(t *testing.T) {
 	t.Run("新形式のサンプルを読み込める", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "mdots.toml")
 		body := "[entries]\n" +
 			`"~/.config/starship.toml" = { src = "dotfiles/.config/starship.toml" }` + "\n" +
-			`"~/.gitconfig" = { targets = [` + "\n" +
-			`  { target = "win", src = "dotfiles/win/.gitconfig" },` + "\n" +
-			`  { target = "wsl", src = "dotfiles/wsl/.gitconfig" },` + "\n" +
-			`] }` + "\n"
+			`"~/.gitconfig" = { targets = { win = { src = "dotfiles/win/.gitconfig" }, wsl = { src = "dotfiles/wsl/.gitconfig" } } }` + "\n"
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -94,8 +91,33 @@ func TestLoadNewFormat(t *testing.T) {
 		}
 	})
 
-	t.Run("宣言順が逆でも解決は配置先ソート順", func(t *testing.T) {
+	t.Run("改行ありのtargetsも読み込める", func(t *testing.T) {
 		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		body := "[entries]\n" +
+			`"~/.gitconfig" = {` + "\n" +
+			`  targets = {` + "\n" +
+			`    win = { src = "dotfiles/win/.gitconfig" },` + "\n" +
+			`    wsl = { src = "dotfiles/wsl/.gitconfig" },` + "\n" +
+			`  },` + "\n" +
+			`}` + "\n"
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		got := cfg.Resolve("wsl")
+		if len(got) != 1 {
+			t.Fatalf("Resolve(wsl) = %d件, want 1件 (%+v)", len(got), got)
+		}
+		if got[0].Dest != "~/.gitconfig" || got[0].Src != "dotfiles/wsl/.gitconfig" {
+			t.Errorf("一致Targetの解決不正: %+v", got[0])
+		}
+	})
+
+	t.Run("宣言順が逆でも解決は配置先ソート順", func(t *testing.T) {		dir := t.TempDir()
 		p := filepath.Join(dir, "mdots.toml")
 		body := "[entries]\n" +
 			`"~/.z" = { src = "z" }` + "\n" +
@@ -122,16 +144,16 @@ func TestLoadNewFormat(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (検証エラー群)
-// 排他違反・欠落・空・重複を明確に失敗させる外部挙動を検証する。
+// 排他違反・欠落・空を明確に失敗させる外部挙動を検証する。
 func TestLoadValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"srcとtargetsの併記は拒否": "[entries]\n\"~/.a\" = { src = \"a\", targets = [{ target = \"win\", src = \"b\" }] }\n",
+		"srcとtargetsの併記は拒否": "[entries]\n\"~/.a\" = { src = \"a\", targets = { win = { src = \"b\" } } }\n",
 		"両方なしは拒否":           "[entries]\n\"~/.a\" = {}\n",
 		"空srcは拒否":           "[entries]\n\"~/.a\" = { src = \"\" }\n",
-		"空targets配列は拒否":     "[entries]\n\"~/.a\" = { targets = [] }\n",
-		"空targetは拒否":        "[entries]\n\"~/.a\" = { targets = [{ target = \"\", src = \"a\" }] }\n",
-		"targets要素の空srcは拒否": "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"\" }] }\n",
-		"同一配置先内の重複は拒否":      "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"a\" }, { target = \"win\", src = \"b\" }] }\n",
+		"空targetsは拒否":       "[entries]\n\"~/.a\" = { targets = {} }\n",
+		"空targetは拒否":        "[entries]\n\"~/.a\" = { targets = { \"\" = { src = \"a\" } } }\n",
+		"targets要素の空srcは拒否": "[entries]\n\"~/.a\" = { targets = { win = { src = \"\" } } }\n",
+		"targets要素のsrc欠落は拒否": "[entries]\n\"~/.a\" = { targets = { win = {} } }\n",
 		"空destは拒否":          "[entries]\n\"\" = { src = \"a\" }\n",
 	}
 	for name, body := range cases {
@@ -149,12 +171,13 @@ func TestLoadValidationErrors(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (旧形式の明確な失敗)
-// 旧配列形式・旧配列Targetは読めず明確に失敗する外部挙動を検証する。
+// 旧配列形式・旧配列Target・旧targets配列は読めず明確に失敗する外部挙動を検証する。
 func TestLoadRejectsOldFormat(t *testing.T) {
 	cases := map[string]string{
 		"旧[[entries]]配列は拒否": "[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
 		"旧target配列は拒否":      "[entries]\n\"~/.a\" = { src = \"a\", target = [\"win\"] }\n",
 		"旧target文字列は拒否":     "[entries]\n\"~/.a\" = { src = \"a\", target = \"win\" }\n",
+		"旧targets配列は拒否":     "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"a\" }] }\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -194,8 +217,8 @@ func TestExpandDest(t *testing.T) {
 
 // Seam: config パッケージ公開境界 (init 雛形作成)
 // 空Store作成・既存ありエラー・生成物がLoadを通る外部挙動を検証する。
-// 雛形は新形式（配置先キー・{src}/{targets}排他・単数Target）のみを含み、
-// 旧形式の記法（[[entries]]・dest =・target配列・common特別扱い）を含まない。
+// 雛形は新形式（配置先キー・{src}/{targets}排他・Targetキー化）のみを含み、
+// 旧形式の記法（[[entries]]・dest =・target配列・旧targets配列・common特別扱い）を含まない。
 func TestInitCreatesTemplate(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Init(dir)
@@ -207,12 +230,12 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	for _, want := range []string{"mdots push", "[entries]", "src =", "targets", "target =", `"~/`} {
+	for _, want := range []string{"[entries]", "src =", "targets", "win = ", `"~/`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("template should contain %q, got:\n%s", want, body)
 		}
 	}
-	for _, old := range []string{"[[entries]]", "dest =", "common", "target = ["} {
+	for _, old := range []string{"[[entries]]", "dest =", "common", "target = [", "target = \"", "{ target = "} {
 		if strings.Contains(body, old) {
 			t.Errorf("template must not contain old format %q, got:\n%s", old, body)
 		}
