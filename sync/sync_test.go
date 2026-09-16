@@ -37,9 +37,9 @@ func TestPushCopiesStoreToDest(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(store, "vimrc"), "set number\n")
 	dest := filepath.Join(destRoot, ".vimrc")
-	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
+	entries := []config.Entry{{Src: "vimrc", Dest: dest, Override: true}}
 
-	if err := Push(store, entries); err != nil {
+	if _, err := Push(store, entries); err != nil {
 		t.Fatalf("Push error: %v", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -56,9 +56,9 @@ func TestPushCreatesParentDirs(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(store, "wezterm.lua"), "return {}\n")
 	dest := filepath.Join(destRoot, ".config", "wezterm", "wezterm.lua")
-	entries := []config.Entry{{Src: "wezterm.lua", Dest: dest}}
+	entries := []config.Entry{{Src: "wezterm.lua", Dest: dest, Override: true}}
 
-	if err := Push(store, entries); err != nil {
+	if _, err := Push(store, entries); err != nil {
 		t.Fatalf("Push error: %v", err)
 	}
 	if _, err := os.Stat(dest); err != nil {
@@ -71,9 +71,9 @@ func TestPushExpandsHomeDest(t *testing.T) {
 	home := isolateHome(t)
 
 	writeTestFile(t, filepath.Join(store, "bashrc"), "export X=1\n")
-	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc"}}
+	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc", Override: true}}
 
-	if err := Push(store, entries); err != nil {
+	if _, err := Push(store, entries); err != nil {
 		t.Fatalf("Push error: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(home, ".bashrc"))
@@ -91,8 +91,8 @@ func TestPushRejectsDirectories(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(store, "mydir"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		entries := []config.Entry{{Src: "mydir", Dest: filepath.Join(destRoot, "mydir")}}
-		if err := Push(store, entries); err == nil {
+		entries := []config.Entry{{Src: "mydir", Dest: filepath.Join(destRoot, "mydir"), Override: true}}
+		if _, err := Push(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
 		}
 	})
@@ -104,8 +104,8 @@ func TestPushRejectsDirectories(t *testing.T) {
 		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		entries := []config.Entry{{Src: "a", Dest: destDir}}
-		if err := Push(store, entries); err == nil {
+		entries := []config.Entry{{Src: "a", Dest: destDir, Override: true}}
+		if _, err := Push(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
 		}
 	})
@@ -117,9 +117,9 @@ func TestPushOverwritesExisting(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "new")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "old")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
-	if err := Push(store, entries); err != nil {
+	if _, err := Push(store, entries); err != nil {
 		t.Fatalf("Push error: %v", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -140,9 +140,9 @@ func TestPushPreservesPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(destRoot, "run.sh")
-	entries := []config.Entry{{Src: "run.sh", Dest: dest}}
+	entries := []config.Entry{{Src: "run.sh", Dest: dest, Override: true}}
 
-	if err := Push(store, entries); err != nil {
+	if _, err := Push(store, entries); err != nil {
 		t.Fatalf("Push error: %v", err)
 	}
 	info, err := os.Stat(dest)
@@ -161,9 +161,9 @@ func TestPullCopiesDestToStore(t *testing.T) {
 
 	dest := filepath.Join(destRoot, ".vimrc")
 	writeTestFile(t, dest, "edited\n")
-	entries := []config.Entry{{Src: "vimrc", Dest: dest}}
+	entries := []config.Entry{{Src: "vimrc", Dest: dest, Override: true}}
 
-	if err := Pull(store, entries); err != nil {
+	if _, err := Pull(store, entries); err != nil {
 		t.Fatalf("Pull error: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "vimrc"))
@@ -183,9 +183,9 @@ func TestPullCreatesParentDirsOnStoreSide(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, dest, "return {}\n")
-	entries := []config.Entry{{Src: filepath.Join(".config", "wezterm", "wezterm.lua"), Dest: dest}}
+	entries := []config.Entry{{Src: filepath.Join(".config", "wezterm", "wezterm.lua"), Dest: dest, Override: true}}
 
-	if err := Pull(store, entries); err != nil {
+	if _, err := Pull(store, entries); err != nil {
 		t.Fatalf("Pull error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(store, ".config", "wezterm", "wezterm.lua")); err != nil {
@@ -198,9 +198,9 @@ func TestPullExpandsHomeDest(t *testing.T) {
 	home := isolateHome(t)
 
 	writeTestFile(t, filepath.Join(home, ".bashrc"), "export X=1\n")
-	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc"}}
+	entries := []config.Entry{{Src: "bashrc", Dest: "~/.bashrc", Override: true}}
 
-	if err := Pull(store, entries); err != nil {
+	if _, err := Pull(store, entries); err != nil {
 		t.Fatalf("Pull error: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "bashrc"))
@@ -219,8 +219,8 @@ func TestPullRejectsDirectories(t *testing.T) {
 		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		entries := []config.Entry{{Src: "a", Dest: destDir}}
-		if err := Pull(store, entries); err == nil {
+		entries := []config.Entry{{Src: "a", Dest: destDir, Override: true}}
+		if _, err := Pull(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
 		}
 	})
@@ -232,8 +232,8 @@ func TestPullRejectsDirectories(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(store, "a"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		entries := []config.Entry{{Src: "a", Dest: dest}}
-		if err := Pull(store, entries); err == nil {
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
+		if _, err := Pull(store, entries); err == nil {
 			t.Error("エラー expected, got nil")
 		}
 	})
@@ -241,8 +241,8 @@ func TestPullRejectsDirectories(t *testing.T) {
 
 func TestPullMissingDestIsError(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
-	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
-	if err := Pull(store, entries); err == nil {
+	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing"), Override: true}}
+	if _, err := Pull(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
 	}
 }
@@ -254,9 +254,9 @@ func TestPullOverwritesExisting(t *testing.T) {
 	writeTestFile(t, dest, "new")
 	srcPath := filepath.Join(store, "a")
 	writeTestFile(t, srcPath, "old")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
-	if err := Pull(store, entries); err != nil {
+	if _, err := Pull(store, entries); err != nil {
 		t.Fatalf("Pull error: %v", err)
 	}
 	got, err := os.ReadFile(srcPath)
@@ -276,9 +276,9 @@ func TestPullPreservesPermission(t *testing.T) {
 	if err := os.Chmod(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	entries := []config.Entry{{Src: "run.sh", Dest: dest}}
+	entries := []config.Entry{{Src: "run.sh", Dest: dest, Override: true}}
 
-	if err := Pull(store, entries); err != nil {
+	if _, err := Pull(store, entries); err != nil {
 		t.Fatalf("Pull error: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(store, "run.sh"))
@@ -292,8 +292,150 @@ func TestPullPreservesPermission(t *testing.T) {
 
 func TestPushMissingSrcIsError(t *testing.T) {
 	store, destRoot := setupSyncDirs(t)
-	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing")}}
-	if err := Push(store, entries); err == nil {
+	entries := []config.Entry{{Src: "missing", Dest: filepath.Join(destRoot, "missing"), Override: true}}
+	if _, err := Push(store, entries); err == nil {
 		t.Error("エラー expected, got nil")
 	}
+}
+
+// Seam: sync パッケージ公開境界 (push の override 保護)
+// 実FSで既存あり＋falseのskip継続・新規作成・権限不変・ディレクトリ時エラーを検証する。
+func TestPushOverrideProtectsExisting(t *testing.T) {
+	t.Run("既存＋falseは内容・権限不変でskip継続する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "new")
+		if err := os.Chmod(filepath.Join(store, "a"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "old")
+		if err := os.Chmod(dest, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(store, "b"), "b-new")
+		destB := filepath.Join(destRoot, "b")
+		entries := []config.Entry{
+			{Src: "a", Dest: dest, Override: false},
+			{Src: "b", Dest: destB, Override: true},
+		}
+
+		skipped, err := Push(store, entries)
+		if err != nil {
+			t.Fatalf("Push error: %v", err)
+		}
+		if len(skipped) != 1 || skipped[0].Src != "a" {
+			t.Errorf("skipped = %+v, want [a]", skipped)
+		}
+		if got, _ := os.ReadFile(dest); string(got) != "old" {
+			t.Errorf("protected dest content = %q, want %q", got, "old")
+		}
+		if info, _ := os.Stat(dest); info.Mode().Perm() != 0o600 {
+			t.Errorf("protected dest perm = %o, want 600", info.Mode().Perm())
+		}
+		if got, _ := os.ReadFile(destB); string(got) != "b-new" {
+			t.Errorf("other entry must continue: content = %q", got)
+		}
+	})
+
+	t.Run("不在時はfalseでも新規作成する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "new\n")
+		dest := filepath.Join(destRoot, "a")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		skipped, err := Push(store, entries)
+		if err != nil {
+			t.Fatalf("Push error: %v", err)
+		}
+		if len(skipped) != 0 {
+			t.Errorf("new file must not be skipped: %+v", skipped)
+		}
+		if got, _ := os.ReadFile(dest); string(got) != "new\n" {
+			t.Errorf("dest content = %q, want %q", got, "new\n")
+		}
+	})
+
+	t.Run("ディレクトリ時はfalseでもエラー中断する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "a")
+		destDir := filepath.Join(destRoot, "existing")
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		entries := []config.Entry{{Src: "a", Dest: destDir, Override: false}}
+		if _, err := Push(store, entries); err == nil {
+			t.Error("dest dir: エラー expected, got nil")
+		}
+	})
+}
+
+// Seam: sync パッケージ公開境界 (pull の override 保護)
+// 実FSで既存あり＋falseのskip継続・新規作成・権限不変・ディレクトリ時エラーを検証する。
+func TestPullOverrideProtectsExisting(t *testing.T) {
+	t.Run("既存＋falseは内容・権限不変でskip継続する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "new")
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		srcPath := filepath.Join(store, "a")
+		writeTestFile(t, srcPath, "old")
+		if err := os.Chmod(srcPath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(destRoot, "b"), "b-new")
+		entries := []config.Entry{
+			{Src: "a", Dest: dest, Override: false},
+			{Src: "b", Dest: filepath.Join(destRoot, "b"), Override: true},
+		}
+
+		skipped, err := Pull(store, entries)
+		if err != nil {
+			t.Fatalf("Pull error: %v", err)
+		}
+		if len(skipped) != 1 || skipped[0].Src != "a" {
+			t.Errorf("skipped = %+v, want [a]", skipped)
+		}
+		if got, _ := os.ReadFile(srcPath); string(got) != "old" {
+			t.Errorf("protected store content = %q, want %q", got, "old")
+		}
+		if info, _ := os.Stat(srcPath); info.Mode().Perm() != 0o600 {
+			t.Errorf("protected store perm = %o, want 600", info.Mode().Perm())
+		}
+		if got, _ := os.ReadFile(filepath.Join(store, "b")); string(got) != "b-new" {
+			t.Errorf("other entry must continue: content = %q", got)
+		}
+	})
+
+	t.Run("不在時はfalseでも新規作成する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "new\n")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		skipped, err := Pull(store, entries)
+		if err != nil {
+			t.Fatalf("Pull error: %v", err)
+		}
+		if len(skipped) != 0 {
+			t.Errorf("new file must not be skipped: %+v", skipped)
+		}
+		if got, _ := os.ReadFile(filepath.Join(store, "a")); string(got) != "new\n" {
+			t.Errorf("store content = %q, want %q", got, "new\n")
+		}
+	})
+
+	t.Run("ディレクトリ時はfalseでもエラー中断する", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "a")
+		if err := os.MkdirAll(filepath.Join(store, "a"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+		if _, err := Pull(store, entries); err == nil {
+			t.Error("store dir: エラー expected, got nil")
+		}
+	})
 }

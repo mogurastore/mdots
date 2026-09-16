@@ -31,3 +31,7 @@ _Avoid_: create, new, setup
 **dry-run**:
 push/pullで書き込まず差分を出力する操作。方向は操作のコピー方向に合わせる。
 _Avoid_: diff, preview
+
+**override**:
+Entryのコピー先に既存ファイルがある場合の上書き可否。falseは既存を保護し新規作成のみ行う。
+_Avoid_: overwrite, force

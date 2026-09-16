@@ -14,20 +14,44 @@ import (
 
 // Push は Store の src を dest へファイルコピーする。
 // Entry の src は Store 相対、dest は ~ 展開される配置先パス。
-// 親ディレクトリは mkdir -p、パーミッションは元ファイルに追従、上書きは無確認。
-// src/dest がディレクトリの場合はエラーになる。src 不在もエラーで中断する。
-func Push(storeRoot string, entries []config.Entry) error {
+// 親ディレクトリは mkdir -p、パーミッションは元ファイルに追従。
+// override=false でコピー先に既存ファイルがある場合は上書きせず skip して継続し、
+// 不在時のみ新規作成する。省略時（true）は従来通り上書きする。
+// src/dest がディレクトリの場合はエラーで中断する。src 不在もエラーで中断する。
+// skip 時は内容・権限を変更しない。戻り値は skip した Entry 群である。
+func Push(storeRoot string, entries []config.Entry) ([]config.Entry, error) {
+	var skipped []config.Entry
 	for _, e := range entries {
 		srcPath := filepath.Join(storeRoot, e.Src)
 		destPath, err := config.ExpandDest(e.Dest)
 		if err != nil {
-			return fmt.Errorf("push %s: dest expand: %w", e.Src, err)
+			return skipped, fmt.Errorf("push %s: dest expand: %w", e.Src, err)
+		}
+		srcInfo, srcErr := os.Stat(srcPath)
+		if srcErr != nil {
+			return skipped, fmt.Errorf("push %s: %w", e.Src, srcErr)
+		}
+		if srcInfo.IsDir() {
+			return skipped, fmt.Errorf("push %s: src is a directory: %s", e.Src, srcPath)
+		}
+		destInfo, destErr := os.Stat(destPath)
+		if destErr != nil && !os.IsNotExist(destErr) {
+			return skipped, fmt.Errorf("push %s: %w", e.Src, destErr)
+		}
+		if destErr == nil {
+			if destInfo.IsDir() {
+				return skipped, fmt.Errorf("push %s: dest is a directory: %s", e.Src, destPath)
+			}
+			if !e.Override {
+				skipped = append(skipped, e)
+				continue
+			}
 		}
 		if err := copyFile(srcPath, destPath); err != nil {
-			return fmt.Errorf("push %s: %w", e.Src, err)
+			return skipped, fmt.Errorf("push %s: %w", e.Src, err)
 		}
 	}
-	return nil
+	return skipped, nil
 }
 
 // ColorAuto etc は push/pull --dry-run の --color 値を表す。auto は FORCE_COLOR > NO_COLOR > tty 判定。
@@ -117,6 +141,7 @@ func diffContent(srcPath, destPath, srcLabel, destLabel string, colorMode string
 // PushDryRun は push のプレビューを dest→Store 方向で返す。書き込みは行わない。
 // pushで追加される行が+になるよう dest を old、Store を new とする。
 // 両方存在する Entry は inline diff を出し、片方不在の Entry は新規作成予定として報告する。
+// override=false でコピー先が存在する Entry は差分ではなく skip として1行報告する。
 // 両方不在・ディレクトリはエラーで中断する。
 func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
 	return diffDryRun(storeRoot, entries, colorMode, "push", false)
@@ -124,8 +149,16 @@ func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (str
 
 // PullDryRun は pull のプレビューを Store→dest 方向で返す。書き込みは行わない。
 // pullで取り込まれる行が+になるよう Store を old、dest を new とする。
+// override=false でコピー先が存在する Entry は差分ではなく skip として1行報告する。
 func PullDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
 	return diffDryRun(storeRoot, entries, colorMode, "pull", true)
+}
+
+// writeSkipNotice は override=false による skip 予定報告を一本化する。
+// 差分ではなく1行報告とし、skip のみでも差分あり扱いになる。
+// 文面は CONTEXT.md の override 用語に従い overwrite/force を避ける。
+func writeSkipNotice(sb *strings.Builder, e config.Entry, op string, useColor bool) {
+	sb.WriteString(colorizeYellow("skipped: "+e.Dest+" (override=false, "+op+" would not override)\n", useColor))
 }
 
 // diffDryRun は push/pull の差分コアである。isPull=false は dest を old・
@@ -181,6 +214,11 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 		if destInfo.IsDir() {
 			return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 		}
+		if !e.Override {
+			writeSkipNotice(&sb, e, op, useColor)
+			hasDiff = true
+			continue
+		}
 		var d string
 		var same bool
 		if isPull {
@@ -201,20 +239,44 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 
 // Pull は dest を Store の src へファイルコピーする。
 // Entry の src は Store 相対、dest は ~ 展開される配置先パス。
-// Push と同じく親ディレクトリは mkdir -p、パーミッションは元ファイルに追従、上書きは無確認。
+// Push と同じく親ディレクトリは mkdir -p、パーミッションは元ファイルに追従。
+// override=false で Store 側に既存ファイルがある場合は上書きせず skip して継続し、
+// 不在時のみ新規作成する。省略時（true）は従来通り上書きする。
 // dest が不在・ディレクトリの場合はエラーで中断する。Store 側がディレクトリの場合もエラーになる。
-func Pull(storeRoot string, entries []config.Entry) error {
+// skip 時は内容・権限を変更しない。戻り値は skip した Entry 群である。
+func Pull(storeRoot string, entries []config.Entry) ([]config.Entry, error) {
+	var skipped []config.Entry
 	for _, e := range entries {
 		destPath, err := config.ExpandDest(e.Dest)
 		if err != nil {
-			return fmt.Errorf("pull %s: dest expand: %w", e.Src, err)
+			return skipped, fmt.Errorf("pull %s: dest expand: %w", e.Src, err)
 		}
 		srcPath := filepath.Join(storeRoot, e.Src)
+		destInfo, destErr := os.Stat(destPath)
+		if destErr != nil {
+			return skipped, fmt.Errorf("pull %s: %w", e.Src, destErr)
+		}
+		if destInfo.IsDir() {
+			return skipped, fmt.Errorf("pull %s: dest is a directory: %s", e.Src, destPath)
+		}
+		srcInfo, srcErr := os.Stat(srcPath)
+		if srcErr != nil && !os.IsNotExist(srcErr) {
+			return skipped, fmt.Errorf("pull %s: %w", e.Src, srcErr)
+		}
+		if srcErr == nil {
+			if srcInfo.IsDir() {
+				return skipped, fmt.Errorf("pull %s: src is a directory: %s", e.Src, srcPath)
+			}
+			if !e.Override {
+				skipped = append(skipped, e)
+				continue
+			}
+		}
 		if err := copyFile(destPath, srcPath); err != nil {
-			return fmt.Errorf("pull %s: %w", e.Src, err)
+			return skipped, fmt.Errorf("pull %s: %w", e.Src, err)
 		}
 	}
-	return nil
+	return skipped, nil
 }
 
 func copyFile(srcPath, destPath string) error {

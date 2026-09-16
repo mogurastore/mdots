@@ -67,20 +67,36 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	return store, cfg.Resolve(target), nil
 }
 
-// runCopy は push/pull のコピー系の共有本体である。方向の違いは copyFn に寄せ、
+// reportSkipped は override=false による skip を警告として報告する。
+// 全体は成功（exit 0）で終える。報告先は既存のエラー出力流儀に合わせ stderr とする。
+// 文面は CONTEXT.md の override 用語に従い overwrite/force を避ける。
+func reportSkipped(skipped []config.Entry, op string) {
+	for _, s := range skipped {
+		fmt.Fprintf(os.Stderr, "skipped: %s (override=false, %s would not override)\n", s.Dest, op)
+	}
+}
+
+// runCopy は push/pull のコピー系の共有本体である。方向の違いは copyFn と op に寄せ、
 // 各 action（runPush/runPull）は薄い委譲に留める。
-func runCopy(cwd string, target string, copyFn func(string, []config.Entry) error) error {
+// skip は警告として stderr に報告し、全体は成功で終える。
+func runCopy(cwd string, target string, op string, copyFn func(string, []config.Entry) ([]config.Entry, error)) error {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		return err
 	}
-	return copyFn(store, entries)
+	skipped, err := copyFn(store, entries)
+	if err != nil {
+		return err
+	}
+	reportSkipped(skipped, op)
+	return nil
 }
 
 // runPush は指定なし＋指定Target の Entry を Store から dest へコピーする。
 // target 未指定時は指定なし Entry のみが対象になる。
+// override=false の既存 dest は保護して skip 継続し、警告を stderr に出す。
 func runPush(cwd string, target string) error {
-	return runCopy(cwd, target, sync.Push)
+	return runCopy(cwd, target, "push", sync.Push)
 }
 
 // runInit はカレント直下に mdots.toml 雛形を作る。
@@ -92,8 +108,9 @@ func runInit(cwd string) error {
 
 // runPull は指定なし＋指定Target の Entry を dest から Store へ回収する。
 // target 未指定時は指定なし Entry のみが対象になる。
+// override=false の既存 Store は保護して skip 継続し、警告を stderr に出す。
 func runPull(cwd string, target string) error {
-	return runCopy(cwd, target, sync.Pull)
+	return runCopy(cwd, target, "pull", sync.Pull)
 }
 
 // emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは No changes. を出して 0。
