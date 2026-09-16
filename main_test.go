@@ -236,6 +236,47 @@ func TestPullMissingDestIsError(t *testing.T) {
 	}
 }
 
+// Seam: CLIコマンド境界 (push/pull の override 保護配線代表例)
+// 実FS上の Store/dest を用い、run 経由の外部挙動のみを検証する。
+// 新規作成・権限・差分詳細は同期・差分の各境界テストに寄せ、ここでは配線確認に留める。
+func TestPushOverrideProtectsExistingRepresentative(t *testing.T) {
+	store, home := setupStoreWithHome(t,
+		map[string]string{"vimrc": "new\n"},
+		map[string]string{".vimrc": "old\n"},
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\", override = false }\n",
+	)
+
+	if code := run([]string{"push"}, store); code != 0 {
+		t.Fatalf("run(push) with override=false exit = %d, want 0", code)
+	}
+	got, err := os.ReadFile(filepath.Join(home, ".vimrc"))
+	if err != nil {
+		t.Fatalf("dest read error: %v", err)
+	}
+	if string(got) != "old\n" {
+		t.Errorf("protected dest content = %q, want %q", got, "old\n")
+	}
+}
+
+func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		map[string]string{"vimrc": "old\n"},
+		map[string]string{".vimrc": "new\n"},
+		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\", override = false }\n",
+	)
+
+	if code := run([]string{"pull"}, store); code != 0 {
+		t.Fatalf("run(pull) with override=false exit = %d, want 0", code)
+	}
+	got, err := os.ReadFile(filepath.Join(store, "vimrc"))
+	if err != nil {
+		t.Fatalf("store read error: %v", err)
+	}
+	if string(got) != "old\n" {
+		t.Errorf("protected store content = %q, want %q", got, "old\n")
+	}
+}
+
 // Store 未発見時の失敗は共通。文言自体は設定境界テストが保証する。
 func TestCommandsWithoutStoreFail(t *testing.T) {
 	empty := t.TempDir()

@@ -274,10 +274,13 @@ func (e Entry) ExpandedDest() (string, error) {
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
 const Template = `[entries]
 # "~/.vimrc" = { src = "vimrc" }
+#
+# "~/.vimrc" = { src = "vimrc", override = false }
+#
 # "~/.gitconfig" = {
 #   targets = {
 #     win = { src = "win/.gitconfig" },
-#     wsl = { src = "wsl/.gitconfig" },
+#     wsl = { src = "wsl/.gitconfig", override = false },
 #   },
 # }
 `

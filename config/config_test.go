@@ -250,6 +250,27 @@ func TestInitCreatesTemplate(t *testing.T) {
 	}
 }
 
+// Seam: config パッケージ公開境界 (init 雛形の override 例)
+// 雛形に override の書き方例がコメントで含まれ、生成物が Load を通る外部挙動を検証する。
+func TestInitTemplateContainsOverrideExample(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Init(dir)
+	if err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "override") {
+		t.Errorf("template should contain override example, got:\n%s", body)
+	}
+	if _, err := Load(p); err != nil {
+		t.Errorf("generated template must Load: %v", err)
+	}
+}
+
 // Seam: config パッケージ公開境界 (Store 発見)
 // カレント直下の mdots.toml のみを参照する外部挙動を t.TempDir() の実FSで検証する。
 func TestFindStore(t *testing.T) {
