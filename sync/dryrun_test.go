@@ -18,7 +18,7 @@ func TestPushDryRunShowsDestToStore(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "old\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestPullDryRunShowsStoreToDest(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "old\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "new\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	out, hasDiff, err := PullDryRun(store, entries, ColorNever)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "new\n")
 		dest := filepath.Join(destRoot, "a")
-		entries := []config.Entry{{Src: "a", Dest: dest}}
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 		out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 		if err != nil {
@@ -81,7 +81,7 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		dest := filepath.Join(destRoot, "a")
 		writeTestFile(t, dest, "new\n")
-		entries := []config.Entry{{Src: "a", Dest: dest}}
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 		out, hasDiff, err := PullDryRun(store, entries, ColorNever)
 		if err != nil {
@@ -97,7 +97,7 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 
 	t.Run("両方不在はエラー", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
-		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a")}}
+		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a"), Override: true}}
 		if _, _, err := PushDryRun(store, entries, ColorNever); err == nil {
 			t.Error("push: エラー expected, got nil")
 		}
@@ -110,7 +110,7 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		dest := filepath.Join(destRoot, "a")
 		writeTestFile(t, dest, "exists\n")
-		entries := []config.Entry{{Src: "a", Dest: dest}}
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 		if _, _, err := PushDryRun(store, entries, ColorNever); err == nil {
 			t.Error("push srcMissing: エラー expected, got nil")
 		}
@@ -119,7 +119,7 @@ func TestDryRunReportsMissingEitherSideAsNew(t *testing.T) {
 	t.Run("pull dest不在はエラー", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "exists\n")
-		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a")}}
+		entries := []config.Entry{{Src: "a", Dest: filepath.Join(destRoot, "a"), Override: true}}
 		if _, _, err := PullDryRun(store, entries, ColorNever); err == nil {
 			t.Error("pull destMissing: エラー expected, got nil")
 		}
@@ -132,7 +132,7 @@ func TestDryRunNoChange(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "same\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "same\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	if out, hasDiff, err := PushDryRun(store, entries, ColorNever); err != nil {
 		t.Fatalf("PushDryRun error: %v", err)
@@ -152,7 +152,7 @@ func TestDryRunDoesNotWrite(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "old\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	if _, _, err := PushDryRun(store, entries, ColorNever); err != nil {
 		t.Fatalf("PushDryRun error: %v", err)
@@ -174,7 +174,7 @@ func TestDryRunColorNeverHasNoANSI(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "old\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	for _, fn := range []func(string, []config.Entry, string) (string, bool, error){PushDryRun, PullDryRun} {
 		out, hasDiff, err := fn(store, entries, ColorNever)
@@ -199,7 +199,7 @@ func TestDryRunColorAlwaysHasANSI(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), "new\n")
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, "old\n")
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	out, hasDiff, err := PushDryRun(store, entries, ColorAlways)
 	if err != nil {
@@ -229,7 +229,7 @@ func TestDryRunLimitsContext(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), newBody.String())
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, oldBody.String())
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestDryRunSplitsHunks(t *testing.T) {
 	writeTestFile(t, filepath.Join(store, "a"), newBody.String())
 	dest := filepath.Join(destRoot, "a")
 	writeTestFile(t, dest, oldBody.String())
-	entries := []config.Entry{{Src: "a", Dest: dest}}
+	entries := []config.Entry{{Src: "a", Dest: dest, Override: true}}
 
 	out, hasDiff, err := PushDryRun(store, entries, ColorNever)
 	if err != nil {
@@ -280,4 +280,89 @@ func TestDryRunSplitsHunks(t *testing.T) {
 	if !strings.Contains(out, "line 5 changed") || !strings.Contains(out, "line 25 changed") {
 		t.Errorf("両変更行を含むべき, got %q", out)
 	}
+}
+
+// Seam: sync パッケージ公開境界 (push/pull dry-run の override skip 報告)
+// 実FS＋色never固定で skip 行・書き込みなし・差分あり扱いを検証する。
+func TestDryRunOverrideSkip(t *testing.T) {
+	t.Run("pushはskip行を報告し書き込まない", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "new\n")
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "old\n")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		out, hasDiff, err := PushDryRun(store, entries, ColorNever)
+		if err != nil {
+			t.Fatalf("PushDryRun error: %v", err)
+		}
+		if !hasDiff {
+			t.Fatal("skip のみでも hasDiff=true expected")
+		}
+		if !strings.Contains(out, "skipped") || !strings.Contains(out, "override=false") {
+			t.Errorf("skip 行は skipped＋override=false を含む expected, got %q", out)
+		}
+		if got, _ := os.ReadFile(dest); string(got) != "old\n" {
+			t.Errorf("dry-run must NOT write dest: content = %q", got)
+		}
+	})
+
+	t.Run("pullはskip行を報告し書き込まない", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "old\n")
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "new\n")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		out, hasDiff, err := PullDryRun(store, entries, ColorNever)
+		if err != nil {
+			t.Fatalf("PullDryRun error: %v", err)
+		}
+		if !hasDiff {
+			t.Fatal("skip のみでも hasDiff=true expected")
+		}
+		if !strings.Contains(out, "skipped") || !strings.Contains(out, "override=false") {
+			t.Errorf("skip 行は skipped＋override=false を含む expected, got %q", out)
+		}
+		if got, _ := os.ReadFile(filepath.Join(store, "a")); string(got) != "old\n" {
+			t.Errorf("dry-run must NOT write Store: content = %q", got)
+		}
+	})
+
+	t.Run("同内容でもskipは差分あり扱い", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "same\n")
+		dest := filepath.Join(destRoot, "a")
+		writeTestFile(t, dest, "same\n")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		out, hasDiff, err := PushDryRun(store, entries, ColorNever)
+		if err != nil {
+			t.Fatalf("PushDryRun error: %v", err)
+		}
+		if !hasDiff || !strings.Contains(out, "skipped") {
+			t.Errorf("same＋false でも skip 報告で hasDiff=true expected, got hasDiff=%v out=%q", hasDiff, out)
+		}
+	})
+
+	t.Run("不在時はskipではなく新規予定になる", func(t *testing.T) {
+		store, destRoot := setupSyncDirs(t)
+		writeTestFile(t, filepath.Join(store, "a"), "new\n")
+		dest := filepath.Join(destRoot, "a")
+		entries := []config.Entry{{Src: "a", Dest: dest, Override: false}}
+
+		out, hasDiff, err := PushDryRun(store, entries, ColorNever)
+		if err != nil {
+			t.Fatalf("PushDryRun error: %v", err)
+		}
+		if !hasDiff {
+			t.Fatal("hasDiff = false, want true")
+		}
+		if strings.Contains(out, "skipped") {
+			t.Errorf("不在時は新規予定 expected、skip ではない: got %q", out)
+		}
+		if !strings.Contains(out, "new file") {
+			t.Errorf("不在時は new file 報告 expected, got %q", out)
+		}
+	})
 }

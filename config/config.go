@@ -18,21 +18,28 @@ type Config struct {
 
 // EntryValue は1つの配置先に対する設定値である。
 // Src か Targets のいずれか一方のみを持つ（排他）。
+// Override は任意指定で、省略時は true として解決される。
+// Targets 形式では Target 値の override が優先され、なければ配置先直下が使われる。
 type EntryValue struct {
-	Src     *string                 `toml:"src"`
-	Targets *map[string]TargetValue `toml:"targets"`
+	Src      *string                 `toml:"src"`
+	Override *bool                   `toml:"override"`
+	Targets  *map[string]TargetValue `toml:"targets"`
 }
 
 // TargetValue は Target キーごとの参照元である。Target はマップキー（単数文字列）。
+// Override は任意指定で、省略時は配置先直下・既定値 true に従う。
 type TargetValue struct {
-	Src *string `toml:"src"`
+	Src      *string `toml:"src"`
+	Override *bool   `toml:"override"`
 }
 
 // Entry は解決済みの1つの管理対象を表す src/dest ペア。
 // src は Store 相対のファイルパス、dest は ~ 展開される配置先パス。
+// Override は既存保護の解決結果で、false は既存を保護し新規作成のみ行う。
 type Entry struct {
-	Src  string `toml:"src"`
-	Dest string `toml:"dest"`
+	Src      string `toml:"src"`
+	Dest     string `toml:"dest"`
+	Override bool   `toml:"override"`
 }
 
 // sortedDests は配置先キーをソート順で返す。解決・検証の順序を固定する。
@@ -49,23 +56,36 @@ func (c Config) sortedDests() []string {
 // 指定なし Entry は Target の有無・値に関わらず常に適用される.
 // {targets} は完全一致のみ適用され、不一致・無指定時はスキップされる.
 // "common" は普通のTargetとしてのみ一致する.
+// override は解決結果に引き継ぐのみで、選択自体には影響しない。省略時は true。
 func (c Config) Resolve(target string) []Entry {
 	dests := c.sortedDests()
 	var out []Entry
 	for _, dest := range dests {
 		v := c.Entries[dest]
 		if v.Src != nil {
-			out = append(out, Entry{Src: *v.Src, Dest: dest})
+			out = append(out, Entry{Src: *v.Src, Dest: dest, Override: resolveOverride(v.Override, nil)})
 			continue
 		}
 		if v.Targets == nil {
 			continue
 		}
 		if tv, ok := (*v.Targets)[target]; ok && tv.Src != nil {
-			out = append(out, Entry{Src: *tv.Src, Dest: dest})
+			out = append(out, Entry{Src: *tv.Src, Dest: dest, Override: resolveOverride(v.Override, tv.Override)})
 		}
 	}
 	return out
+}
+
+// resolveOverride は override の解決規則である。Target 値が優先され、
+// なければ配置先直下、どちらも省略時は true（上書きする＝現状維持）。
+func resolveOverride(top, inner *bool) bool {
+	if inner != nil {
+		return *inner
+	}
+	if top != nil {
+		return *top
+	}
+	return true
 }
 
 // Load は Store の mdots.toml を読み込み、validation して返す。
@@ -93,7 +113,8 @@ func Load(path string) (Config, error) {
 
 // rejectOldFormat は旧形式を汎用マップで先読みし、明確な失敗文言で拒否する。
 // 旧 [[entries]] 配列・旧 target 記法・旧 targets 配列を拒否し、
-// 新 targets マップ値の未知フィールドもここで厳密に拒否する。
+// 配置先直下と targets マップ値の未知フィールドもここで厳密に拒否する。
+// override は bool のみ受け付け、不正値は明確に失敗させる。
 func rejectOldFormat(data []byte) error {
 	var raw map[string]interface{}
 	if err := toml.Unmarshal(data, &raw); err != nil {
@@ -114,6 +135,16 @@ func rejectOldFormat(data []byte) error {
 			if _, ok := m["target"]; ok {
 				return fmt.Errorf("entries[%q]: old target format is no longer supported (use targets = { win = { src = \"...\" } })", dest)
 			}
+			for field := range m {
+				if field != "src" && field != "targets" && field != "override" {
+					return fmt.Errorf("entries[%q]: unknown field %q", dest, field)
+				}
+			}
+			if ov, ok := m["override"]; ok && ov != nil {
+				if _, ok := ov.(bool); !ok {
+					return fmt.Errorf("entries[%q]: override must be a boolean", dest)
+				}
+			}
 			tv, ok := m["targets"]
 			if !ok || tv == nil {
 				continue
@@ -127,8 +158,13 @@ func rejectOldFormat(data []byte) error {
 						return fmt.Errorf("entries[%q].targets[%q]: table expected", dest, tname)
 					}
 					for field := range tm {
-						if field != "src" {
+						if field != "src" && field != "override" {
 							return fmt.Errorf("entries[%q].targets[%q]: unknown field %q", dest, tname, field)
+						}
+					}
+					if ov, ok := tm["override"]; ok && ov != nil {
+						if _, ok := ov.(bool); !ok {
+							return fmt.Errorf("entries[%q].targets[%q]: override must be a boolean", dest, tname)
 						}
 					}
 				}

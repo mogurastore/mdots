@@ -31,11 +31,11 @@ func TestResolve(t *testing.T) {
 		target string
 		want   []Entry
 	}{
-		{"無指定は指定なしのみ", "", []Entry{{Src: "a", Dest: "~/.a"}}},
-		{"winは指定なし＋一致のみ", "win", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "b-win", Dest: "~/.b"}}},
-		{"wslは指定なし＋一致のみ", "wsl", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "b-wsl", Dest: "~/.b"}}},
-		{"commonは普通のTargetとして一致のみ", "common", []Entry{{Src: "a", Dest: "~/.a"}, {Src: "c-common", Dest: "~/.c"}}},
-		{"未知Targetは指定なしのみ", "linux", []Entry{{Src: "a", Dest: "~/.a"}}},
+		{"無指定は指定なしのみ", "", []Entry{{Src: "a", Dest: "~/.a", Override: true}}},
+		{"winは指定なし＋一致のみ", "win", []Entry{{Src: "a", Dest: "~/.a", Override: true}, {Src: "b-win", Dest: "~/.b", Override: true}}},
+		{"wslは指定なし＋一致のみ", "wsl", []Entry{{Src: "a", Dest: "~/.a", Override: true}, {Src: "b-wsl", Dest: "~/.b", Override: true}}},
+		{"commonは普通のTargetとして一致のみ", "common", []Entry{{Src: "a", Dest: "~/.a", Override: true}, {Src: "c-common", Dest: "~/.c", Override: true}}},
+		{"未知Targetは指定なしのみ", "linux", []Entry{{Src: "a", Dest: "~/.a", Override: true}}},
 	}
 
 	for _, tt := range tests {
@@ -298,4 +298,105 @@ func TestFindStore(t *testing.T) {
 			t.Errorf("旧文言が残っている: got %q", err.Error())
 		}
 	})
+}
+
+// Seam: config パッケージ公開境界 (override の読み・解決)
+// 配置先直下・targets 内の override を実ファイル＋Load/Resolve の外部挙動で検証する。
+// 省略時は true、選択自体には影響しない。
+func TestLoadOverrideResolves(t *testing.T) {
+	load := func(t *testing.T, body string) Config {
+		t.Helper()
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		return cfg
+	}
+
+	t.Run("省略時はtrue", func(t *testing.T) {
+		cfg := load(t, "[entries]\n\"~/.a\" = { src = \"a\" }\n")
+		got := cfg.Resolve("")
+		if len(got) != 1 || !got[0].Override {
+			t.Errorf("省略時は Override=true expected, got %+v", got)
+		}
+	})
+
+	t.Run("配置先直下のfalseを解決できる", func(t *testing.T) {
+		cfg := load(t, "[entries]\n\"~/.a\" = { src = \"a\", override = false }\n")
+		got := cfg.Resolve("")
+		if len(got) != 1 || got[0].Override {
+			t.Errorf("Override=false expected, got %+v", got)
+		}
+	})
+
+	t.Run("配置先直下のtrueを解決できる", func(t *testing.T) {
+		cfg := load(t, "[entries]\n\"~/.a\" = { src = \"a\", override = true }\n")
+		got := cfg.Resolve("")
+		if len(got) != 1 || !got[0].Override {
+			t.Errorf("Override=true expected, got %+v", got)
+		}
+	})
+
+	t.Run("targets内でTargetごとに変えられる", func(t *testing.T) {
+		body := "[entries]\n" +
+			`"~/.a" = { targets = { win = { src = "b", override = false }, wsl = { src = "c" } } }` + "\n"
+		cfg := load(t, body)
+		gotWin := cfg.Resolve("win")
+		if len(gotWin) != 1 || gotWin[0].Override {
+			t.Errorf("win は false expected, got %+v", gotWin)
+		}
+		gotWsl := cfg.Resolve("wsl")
+		if len(gotWsl) != 1 || !gotWsl[0].Override {
+			t.Errorf("wsl は省略時 true expected, got %+v", gotWsl)
+		}
+	})
+
+	t.Run("overrideは選択に影響しない", func(t *testing.T) {
+		body := "[entries]\n" +
+			`"~/.a" = { src = "a", override = false }` + "\n" +
+			`"~/.b" = { targets = { win = { src = "b", override = false } } }` + "\n"
+		cfg := load(t, body)
+		if got := cfg.Resolve(""); len(got) != 1 || got[0].Dest != "~/.a" {
+			t.Errorf("無指定は指定なしのみ expected, got %+v", got)
+		}
+		if got := cfg.Resolve("win"); len(got) != 2 {
+			t.Errorf("win は2件 expected, got %+v", got)
+		}
+		if got := cfg.Resolve("linux"); len(got) != 1 || got[0].Dest != "~/.a" {
+			t.Errorf("未知Targetは指定なしのみ expected, got %+v", got)
+		}
+	})
+}
+
+// Seam: config パッケージ公開境界 (override の検証エラー)
+// 不正値・未知フィールドを明確に失敗させる外部挙動を検証する。
+func TestLoadOverrideValidationErrors(t *testing.T) {
+	cases := map[string]string{
+		"配置先直下の文字列は拒否":       "[entries]\n\"~/.a\" = { src = \"a\", override = \"yes\" }\n",
+		"配置先直下の数値は拒否":         "[entries]\n\"~/.a\" = { src = \"a\", override = 1 }\n",
+		"targets内の文字列は拒否":        "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", override = \"no\" } } }\n",
+		"配置先直下の未知フィールドは拒否": "[entries]\n\"~/.a\" = { src = \"a\", overwride = false }\n",
+		"targets内の未知フィールドは拒否":  "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", overide = false } } }\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "mdots.toml")
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil {
+				t.Fatalf("%s: エラー expected, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "override") && !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("%s: override/unknown を含む明確な失敗 expected, got %q", name, err.Error())
+			}
+		})
+	}
 }
