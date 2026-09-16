@@ -275,7 +275,7 @@ func (e Entry) ExpandedDest() (string, error) {
 const Template = `[entries]
 # "~/.vimrc" = { src = "vimrc" }
 #
-# "~/.vimrc" = { src = "vimrc", override = false }
+# "~/.bashrc" = { src = "bashrc", override = false }
 #
 # "~/.gitconfig" = {
 #   targets = {
