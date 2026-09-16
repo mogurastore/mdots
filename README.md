@@ -7,6 +7,7 @@ dotfilesを管理するCLI。
 - 双方向にコピー（push/pull）
 - target指定で複数環境に対応
 - symlinkではなくファイルをコピーする方式
+- override=falseで既存を保護し新規作成のみ行う
 
 ## インストール
 
@@ -24,15 +25,6 @@ mise use github:mogurastore/mdots@latest
 # 設定ファイルを作る
 mdots init
 
-# mdots.toml を編集する（配置先をキーにする）
-# "~/.vimrc" = { src = "vimrc" }
-# "~/.gitconfig" = {
-#   targets = {
-#     win = { src = "win/.gitconfig" },
-#     wsl = { src = "wsl/.gitconfig" },
-#   },
-# }
-
 # ファイルをコピー
 mdots push
 mdots pull
@@ -44,4 +36,22 @@ mdots pull --target win
 # 差分を確認
 mdots push --dry-run
 mdots pull --dry-run
+```
+
+## 設定例（mdots.toml）
+
+配置先をキーにする。
+
+```toml
+[entries]
+"~/.vimrc" = { src = "vimrc" }
+
+"~/.bashrc" = { src = "bashrc", override = false }
+
+"~/.gitconfig" = {
+  targets = {
+    win = { src = "win/.gitconfig" },
+    wsl = { src = "wsl/.gitconfig", override = false },
+  },
+}
 ```
