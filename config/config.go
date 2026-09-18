@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -339,4 +340,95 @@ func FindStore(startDir string) (string, error) {
 		return abs, nil
 	}
 	return "", fmt.Errorf("mdots.toml not found in %s", abs)
+}
+
+// NormalizeDest は add の入力 dest を Entry の配置先キー形（~/...）に正規化する。
+// ~/... は残りを Clean して ~/... に整え、HOME 配下の絶対パスは ~/... に変換する。
+// HOME 自体・~/ 直下は ~ に整える。それ以外はエラーを返す。
+func NormalizeDest(raw string) (string, error) {
+	if raw == "~" {
+		return "~", nil
+	}
+	if strings.HasPrefix(raw, "~/") {
+		rest := raw[2:]
+		cleaned := filepath.Clean(rest)
+		if cleaned == "." {
+			return "~", nil
+		}
+		return "~/" + filepath.ToSlash(cleaned), nil
+	}
+	if filepath.IsAbs(raw) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		absClean := filepath.Clean(raw)
+		homeClean := filepath.Clean(home)
+		if absClean == homeClean {
+			return "~", nil
+		}
+		if strings.HasPrefix(absClean, homeClean+string(os.PathSeparator)) {
+			rel := strings.TrimPrefix(absClean, homeClean+string(os.PathSeparator))
+			return "~/" + filepath.ToSlash(rel), nil
+		}
+	}
+	return "", fmt.Errorf("dest must be ~/... or under HOME: %q", raw)
+}
+
+// SrcForDest は正規化済み dest から Store 相対の src を算出する。
+// ~/ を除去し dotfiles/ を付ける。~ 自体は dotfiles に写像する。
+func SrcForDest(normalizedDest string) (string, error) {
+	if normalizedDest == "~" {
+		return "dotfiles", nil
+	}
+	if strings.HasPrefix(normalizedDest, "~/") {
+		rest := normalizedDest[2:]
+		if rest == "" {
+			return "dotfiles", nil
+		}
+		return "dotfiles/" + rest, nil
+	}
+	return "", fmt.Errorf("dest must be ~/...: %q", normalizedDest)
+}
+
+// Add は未登録の配置先を素の src 形式で新規 Entry として登録する。
+// 既存 dest はエラーを返し、override は書かない（省略時 true として解決される）。
+func (c *Config) Add(dest, src string) error {
+	if dest == "" {
+		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+	}
+	if src == "" {
+		return fmt.Errorf("entries[%q]: src is required", dest)
+	}
+	if c.Entries == nil {
+		c.Entries = map[string]EntryValue{}
+	}
+	if _, ok := c.Entries[dest]; ok {
+		return fmt.Errorf("entries[%q]: already registered", dest)
+	}
+	s := src
+	c.Entries[dest] = EntryValue{Src: &s}
+	return nil
+}
+
+// Save は Config 全体をテーブル形式で保存する。
+// [entries] 親ヘッダ行は出さず、インデントも付けない。
+// 生成物は Load で読みに戻せる（ヘッダあり・なし・インライン・targets・override 混在）。
+func (c Config) Save(path string) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(c); err != nil {
+		return err
+	}
+	out := buf.String()
+	out = strings.TrimPrefix(out, "[entries]\n")
+	out = strings.TrimPrefix(out, "[entries]")
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return os.WriteFile(path, []byte(out), 0o644)
 }
