@@ -141,7 +141,7 @@ func diffContent(srcPath, destPath, srcLabel, destLabel string, colorMode string
 // PushDryRun は push のプレビューを dest→Store 方向で返す。書き込みは行わない。
 // pushで追加される行が+になるよう dest を old、Store を new とする。
 // 両方存在する Entry は inline diff を出し、片方不在の Entry は新規作成予定として報告する。
-// override=false でコピー先が存在する Entry は差分ではなく skip として1行報告する。
+// override=false でコピー先が存在する Entry は無出力・差分なし扱いとし、skip 報告はしない。
 // 両方不在・ディレクトリはエラーで中断する。
 func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
 	return diffDryRun(storeRoot, entries, colorMode, "push", false)
@@ -149,16 +149,9 @@ func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (str
 
 // PullDryRun は pull のプレビューを Store→dest 方向で返す。書き込みは行わない。
 // pullで取り込まれる行が+になるよう Store を old、dest を new とする。
-// override=false でコピー先が存在する Entry は差分ではなく skip として1行報告する。
+// override=false でコピー先が存在する Entry は無出力・差分なし扱いとし、skip 報告はしない。
 func PullDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
 	return diffDryRun(storeRoot, entries, colorMode, "pull", true)
-}
-
-// writeSkipNotice は override=false による skip 予定報告を一本化する。
-// 差分ではなく1行報告とし、skip のみでも差分あり扱いになる。
-// 文面は CONTEXT.md の override 用語に従い overwrite/force を避ける。
-func writeSkipNotice(sb *strings.Builder, e config.Entry, op string, useColor bool) {
-	sb.WriteString(colorizeYellow("skipped: "+e.Dest+" (override=false, "+op+" would not override)\n", useColor))
 }
 
 // diffDryRun は push/pull の差分コアである。isPull=false は dest を old・
@@ -215,8 +208,6 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 			return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 		}
 		if !e.Override {
-			writeSkipNotice(&sb, e, op, useColor)
-			hasDiff = true
 			continue
 		}
 		var d string
