@@ -34,6 +34,10 @@ type fakeExecutor struct {
 
 	initCalls int
 	initErr   error
+
+	targetsCalls int
+	targetsOut   []string
+	targetsErr   error
 }
 
 func (f *fakeExecutor) Push(cwd, target string) error {
@@ -67,6 +71,11 @@ func (f *fakeExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.W
 func (f *fakeExecutor) Init(cwd string) error {
 	f.initCalls++
 	return f.initErr
+}
+
+func (f *fakeExecutor) Targets(cwd string) ([]string, error) {
+	f.targetsCalls++
+	return f.targetsOut, f.targetsErr
 }
 
 func runCli(t *testing.T, ex Executor, args []string) (int, string, string) {
@@ -596,5 +605,57 @@ func TestCliInitExecutorError(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "mdots.toml already exists") {
 		t.Errorf("stderr should contain already exists, got %q", errOut)
+	}
+}
+
+// Seam: CLIコマンド境界 (targets 一覧表示)
+// 定義済みTarget名の一覧表示の外部挙動のみを検証する。
+func TestCliTargetsDispatches(t *testing.T) {
+	ex := &fakeExecutor{targetsOut: []string{"win", "wsl"}}
+	code, out, _ := runCli(t, ex, []string{"targets"})
+	if code != 0 {
+		t.Fatalf("Run(targets) exit = %d, want 0", code)
+	}
+	if ex.targetsCalls != 1 {
+		t.Fatalf("Targets calls = %d, want 1", ex.targetsCalls)
+	}
+	if out != "win\nwsl\n" {
+		t.Errorf("output = %q, want %q", out, "win\nwsl\n")
+	}
+}
+
+func TestCliTargetsEmpty(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, out, _ := runCli(t, ex, []string{"targets"})
+	if code != 0 {
+		t.Fatalf("Run(targets) exit = %d, want 0", code)
+	}
+	if out != "" {
+		t.Errorf("output = %q, want empty", out)
+	}
+}
+
+func TestCliTargetsRejectsExtraArgs(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, _, errOut := runCli(t, ex, []string{"targets", "extra"})
+	if code == 0 {
+		t.Error("Run(targets extra): exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "unknown argument: extra") {
+		t.Errorf("stderr should contain unknown argument, got %q", errOut)
+	}
+	if ex.targetsCalls != 0 {
+		t.Error("Targets must not run with extra args")
+	}
+}
+
+func TestCliTargetsExecutorError(t *testing.T) {
+	ex := &fakeExecutor{targetsErr: errors.New("mdots.toml not found in /tmp/x")}
+	code, _, errOut := runCli(t, ex, []string{"targets"})
+	if code == 0 {
+		t.Fatal("Run(targets) with executor error: exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "mdots.toml not found") {
+		t.Errorf("stderr should contain executor error, got %q", errOut)
 	}
 }

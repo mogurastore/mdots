@@ -52,6 +52,8 @@ func (cliExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Write
 
 func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 
+func (cliExecutor) Targets(cwd string) ([]string, error) { return runTargets(cwd) }
+
 // resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、
 // push/pull で共有する。解決規則は config.Resolve に寄せる
 // （指定なしは常時＋一致Targetのみ、配置先ソート順）。
@@ -104,6 +106,20 @@ func runPush(cwd string, target string) error {
 func runInit(cwd string) error {
 	_, err := config.Init(cwd)
 	return err
+}
+
+// runTargets は定義済みTarget名を重複排除・ソートして返す。
+// Store不在・toml不正時はエラーを返す。
+func runTargets(cwd string) ([]string, error) {
+	store, err := config.FindStore(cwd)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
+	if err != nil {
+		return nil, err
+	}
+	return cfg.Targets(), nil
 }
 
 // runPull は指定なし＋指定Target の Entry を dest から Store へ回収する。

@@ -33,6 +33,9 @@ mdots pull
 mdots push --target win
 mdots pull --target win
 
+# 定義済みTarget名の一覧を表示
+mdots targets
+
 # 差分を確認
 mdots push --dry-run
 mdots pull --dry-run

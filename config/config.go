@@ -76,6 +76,27 @@ func (c Config) Resolve(target string) []Entry {
 	return out
 }
 
+// Targets は全Entryのtargetsキーを集約し重複排除・ソートして返す。
+// 指定なしEntryは無視し、targetsマップのキーのみを対象とする。
+// 未定義時は空スライスを返す。
+func (c Config) Targets() []string {
+	seen := map[string]struct{}{}
+	for _, v := range c.Entries {
+		if v.Targets == nil {
+			continue
+		}
+		for tname := range *v.Targets {
+			seen[tname] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for tname := range seen {
+		out = append(out, tname)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // resolveOverride は override の解決規則である。Target 値が優先され、
 // なければ配置先直下、どちらも省略時は true（上書きする＝現状維持）。
 func resolveOverride(top, inner *bool) bool {

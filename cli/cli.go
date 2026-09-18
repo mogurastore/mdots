@@ -16,7 +16,7 @@ import (
 	cliv3 "github.com/urfave/cli/v3"
 )
 
-// Executor は push/pull/init の内部実行系への委譲口である。
+// Executor は push/pull/init/targets の内部実行系への委譲口である。
 // 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
 type Executor interface {
 	Push(cwd, target string) error
@@ -24,6 +24,7 @@ type Executor interface {
 	PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int
 	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
 	Init(cwd string) error
+	Targets(cwd string) ([]string, error)
 }
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -140,6 +141,11 @@ func (r *runner) newCommand() *cliv3.Command {
 				Usage:  "Storeにmdots.toml雛形を作る",
 				Action: r.initAction,
 			},
+			{
+				Name:   "targets",
+				Usage:  "定義済みTarget名の一覧を表示する",
+				Action: r.targetsAction,
+			},
 		},
 	}
 }
@@ -232,5 +238,20 @@ func (r *runner) initAction(_ context.Context, cmd *cliv3.Command) error {
 		return &exitError{code: 1}
 	}
 	fmt.Fprintln(r.stdout, "created mdots.toml")
+	return nil
+}
+
+func (r *runner) targetsAction(_ context.Context, cmd *cliv3.Command) error {
+	if cmd.Args().Present() {
+		return r.argError(cmd.Args().First())
+	}
+	names, err := r.exec.Targets(r.cwd)
+	if err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
+	}
+	for _, name := range names {
+		fmt.Fprintln(r.stdout, name)
+	}
 	return nil
 }
