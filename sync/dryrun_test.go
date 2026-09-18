@@ -282,10 +282,10 @@ func TestDryRunSplitsHunks(t *testing.T) {
 	}
 }
 
-// Seam: sync パッケージ公開境界 (push/pull dry-run の override skip 報告)
-// 実FS＋色never固定で skip 行・書き込みなし・差分あり扱いを検証する。
+// Seam: sync パッケージ公開境界 (push/pull dry-run の override skip 非報告)
+// 実FS＋色never固定で 無出力・hasDiff=false・書き込みなしを検証する。
 func TestDryRunOverrideSkip(t *testing.T) {
-	t.Run("pushはskip行を報告し書き込まない", func(t *testing.T) {
+	t.Run("pushはskipを報告せず無出力・差分なし扱い", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "new\n")
 		dest := filepath.Join(destRoot, "a")
@@ -296,18 +296,18 @@ func TestDryRunOverrideSkip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PushDryRun error: %v", err)
 		}
-		if !hasDiff {
-			t.Fatal("skip のみでも hasDiff=true expected")
+		if hasDiff {
+			t.Errorf("override=false＋既存ありは hasDiff=false expected, got true (out=%q)", out)
 		}
-		if !strings.Contains(out, "skipped") || !strings.Contains(out, "override=false") {
-			t.Errorf("skip 行は skipped＋override=false を含む expected, got %q", out)
+		if out != "" {
+			t.Errorf("override=false＋既存ありは無出力 expected, got %q", out)
 		}
 		if got, _ := os.ReadFile(dest); string(got) != "old\n" {
 			t.Errorf("dry-run must NOT write dest: content = %q", got)
 		}
 	})
 
-	t.Run("pullはskip行を報告し書き込まない", func(t *testing.T) {
+	t.Run("pullはskipを報告せず無出力・差分なし扱い", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "old\n")
 		dest := filepath.Join(destRoot, "a")
@@ -318,18 +318,18 @@ func TestDryRunOverrideSkip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PullDryRun error: %v", err)
 		}
-		if !hasDiff {
-			t.Fatal("skip のみでも hasDiff=true expected")
+		if hasDiff {
+			t.Errorf("override=false＋既存ありは hasDiff=false expected, got true (out=%q)", out)
 		}
-		if !strings.Contains(out, "skipped") || !strings.Contains(out, "override=false") {
-			t.Errorf("skip 行は skipped＋override=false を含む expected, got %q", out)
+		if out != "" {
+			t.Errorf("override=false＋既存ありは無出力 expected, got %q", out)
 		}
 		if got, _ := os.ReadFile(filepath.Join(store, "a")); string(got) != "old\n" {
 			t.Errorf("dry-run must NOT write Store: content = %q", got)
 		}
 	})
 
-	t.Run("同内容でもskipは差分あり扱い", func(t *testing.T) {
+	t.Run("同内容でもskipは無出力・差分なし扱い", func(t *testing.T) {
 		store, destRoot := setupSyncDirs(t)
 		writeTestFile(t, filepath.Join(store, "a"), "same\n")
 		dest := filepath.Join(destRoot, "a")
@@ -340,8 +340,8 @@ func TestDryRunOverrideSkip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PushDryRun error: %v", err)
 		}
-		if !hasDiff || !strings.Contains(out, "skipped") {
-			t.Errorf("same＋false でも skip 報告で hasDiff=true expected, got hasDiff=%v out=%q", hasDiff, out)
+		if hasDiff || out != "" {
+			t.Errorf("same＋false でも無出力で hasDiff=false expected, got hasDiff=%v out=%q", hasDiff, out)
 		}
 	})
 
