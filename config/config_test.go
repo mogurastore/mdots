@@ -469,3 +469,212 @@ func TestLoadOverrideValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+// Seam: config パッケージ公開境界 (add向けdest正規化)
+// ~/...維持・HOME配下絶対パス→~/...・それ以外エラーの外部挙動を検証する。
+func TestNormalizeDest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if got, err := NormalizeDest("~/.vimrc"); err != nil || got != "~/.vimrc" {
+		t.Errorf("NormalizeDest(~/...) = %q, %v; want %q, nil", got, err, "~/.vimrc")
+	}
+	if got, err := NormalizeDest("~"); err != nil || got != "~" {
+		t.Errorf("NormalizeDest(~) = %q, %v; want %q, nil", got, err, "~")
+	}
+	abs := filepath.Join(home, ".vimrc")
+	if got, err := NormalizeDest(abs); err != nil || got != "~/.vimrc" {
+		t.Errorf("NormalizeDest(HOME配下絶対) = %q, %v; want %q, nil", got, err, "~/.vimrc")
+	}
+	if got, err := NormalizeDest(home); err != nil || got != "~" {
+		t.Errorf("NormalizeDest(HOME自体) = %q, %v; want %q, nil", got, err, "~")
+	}
+	for _, raw := range []string{"/etc/hosts", "relative/path", "~other/.vimrc", ""} {
+		if got, err := NormalizeDest(raw); err == nil {
+			t.Errorf("NormalizeDest(%q) = %q, want error", raw, got)
+		}
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向けsrc算出)
+// ~/除去＋dotfiles/＋残りの外部挙動を検証する。
+func TestSrcForDest(t *testing.T) {
+	if got, err := SrcForDest("~/.vimrc"); err != nil || got != "dotfiles/.vimrc" {
+		t.Errorf("SrcForDest(~/.vimrc) = %q, %v; want %q, nil", got, err, "dotfiles/.vimrc")
+	}
+	if got, err := SrcForDest("~/.config/helix/config.toml"); err != nil || got != "dotfiles/.config/helix/config.toml" {
+		t.Errorf("SrcForDest深い階層 = %q, %v", got, err)
+	}
+	if got, err := SrcForDest("~"); err != nil || got != "dotfiles" {
+		t.Errorf("SrcForDest(~) = %q, %v; want dotfiles, nil", got, err)
+	}
+	if _, err := SrcForDest("/etc/hosts"); err == nil {
+		t.Error("SrcForDest(絶対パス): エラー expected, got nil")
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向け登録)
+// 素のsrc形式での登録・既存destエラー・overrideを書かない外部挙動を検証する。
+func TestAddRegistersPlainSrc(t *testing.T) {
+	var cfg Config
+	if err := cfg.Add("~/.vimrc", "dotfiles/.vimrc"); err != nil {
+		t.Fatalf("Add error: %v", err)
+	}
+	got := cfg.Resolve("")
+	if len(got) != 1 || got[0].Dest != "~/.vimrc" || got[0].Src != "dotfiles/.vimrc" || !got[0].Override {
+		t.Errorf("登録後の解決不正: %+v", got)
+	}
+	if err := cfg.Add("~/.vimrc", "dotfiles/.vimrc"); err == nil {
+		t.Error("既存destの再登録: エラー expected, got nil")
+	} else if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("既存destエラー文言不正: got %q", err.Error())
+	}
+	if err := cfg.Add("", "a"); err == nil {
+		t.Error("空dest: エラー expected, got nil")
+	}
+	if err := cfg.Add("~/.a", ""); err == nil {
+		t.Error("空src: エラー expected, got nil")
+	}
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(p); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "override") {
+		t.Errorf("素のsrc登録でoverrideを書かない expected, got:\n%s", data)
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向け保存記法)
+// テーブル形式・[entries]親ヘッダ行なし・インデントなしの完全一致を検証する。
+func TestSaveExactFormat(t *testing.T) {
+	var cfg Config
+	if err := cfg.Add("~/.vimrc", "dotfiles/.vimrc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Add("~/.bashrc", "dotfiles/.bashrc"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(p); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[entries.\"~/.bashrc\"]\nsrc = \"dotfiles/.bashrc\"\n[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+	if string(data) != want {
+		t.Errorf("保存記法の完全一致失敗:\ngot:\n%s\nwant:\n%s", data, want)
+	}
+	if strings.Contains(string(data), "[entries]\n") {
+		t.Errorf("[entries]親ヘッダ行なし expected, got:\n%s", data)
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			t.Errorf("インデントなし expected, got line %q", line)
+		}
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向け保存の往復)
+// 保存物が既存読み込み（ヘッダあり・なし・インライン・targets・override混在）で読める外部挙動を検証する。
+func TestSaveRoundTripMixed(t *testing.T) {
+	body := "[entries]\n" +
+		`"~/.a" = { src = "dotfiles/.a" }` + "\n" +
+		`"~/.b" = { src = "dotfiles/.b", override = false }` + "\n" +
+		`"~/.c" = { targets = { win = { src = "dotfiles/win/.c" }, wsl = { src = "dotfiles/wsl/.c", override = false } } }` + "\n"
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src.toml")
+	if err := os.WriteFile(srcPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(srcPath)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if err := cfg.Add("~/.d", "dotfiles/.d"); err != nil {
+		t.Fatalf("Add error: %v", err)
+	}
+	dstPath := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(dstPath); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	back, err := Load(dstPath)
+	if err != nil {
+		t.Fatalf("保存物のLoad error: %v\n保存物:\n%s", err, readFileForTest(t, dstPath))
+	}
+	if len(back.Entries) != 4 {
+		t.Fatalf("往復後のEntries = %d件, want 4件", len(back.Entries))
+	}
+	for _, target := range []string{"", "win", "wsl"} {
+		want := cfg.Resolve(target)
+		got := back.Resolve(target)
+		if len(got) != len(want) {
+			t.Fatalf("Resolve(%q) 件数不一致: got %+v, want %+v", target, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("Resolve(%q)[%d] = %+v, want %+v", target, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向け保存の特殊文字往復)
+// 特殊文字を含むキーでも往復できる外部挙動を検証する。
+func TestSaveRoundTripSpecialChars(t *testing.T) {
+	dests := []string{`~/.config/a"b`, `~/a\b`, `~/sp ace`, `~/.config/#hash`}
+	var cfg Config
+	for _, d := range dests {
+		src, err := SrcForDest(d)
+		if err != nil {
+			t.Fatalf("SrcForDest(%q) error: %v", d, err)
+		}
+		if err := cfg.Add(d, src); err != nil {
+			t.Fatalf("Add(%q) error: %v", d, err)
+		}
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(p); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	back, err := Load(p)
+	if err != nil {
+		t.Fatalf("特殊文字保存物のLoad error: %v\n保存物:\n%s", err, readFileForTest(t, p))
+	}
+	if len(back.Entries) != len(dests) {
+		t.Fatalf("往復後のEntries = %d件, want %d件", len(back.Entries), len(dests))
+	}
+	for _, d := range dests {
+		v, ok := back.Entries[d]
+		if !ok {
+			t.Errorf("往復後にキー消失: %q", d)
+			continue
+		}
+		if v.Src == nil {
+			t.Errorf("%q: src消失", d)
+			continue
+		}
+		wantSrc, _ := SrcForDest(d)
+		if *v.Src != wantSrc {
+			t.Errorf("%q: src = %q, want %q", d, *v.Src, wantSrc)
+		}
+	}
+}
+
+func readFileForTest(t *testing.T, p string) string {
+	t.Helper()
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "(read error: " + err.Error() + ")"
+	}
+	return string(data)
+}
