@@ -38,6 +38,12 @@ type fakeExecutor struct {
 	targetsCalls int
 	targetsOut   []string
 	targetsErr   error
+
+	addCalls int
+	addDest  string
+	addKey   string
+	addSrc   string
+	addErr   error
 }
 
 func (f *fakeExecutor) Push(cwd, target string) error {
@@ -76,6 +82,12 @@ func (f *fakeExecutor) Init(cwd string) error {
 func (f *fakeExecutor) Targets(cwd string) ([]string, error) {
 	f.targetsCalls++
 	return f.targetsOut, f.targetsErr
+}
+
+func (f *fakeExecutor) Add(cwd, dest string) (string, string, error) {
+	f.addCalls++
+	f.addDest = dest
+	return f.addKey, f.addSrc, f.addErr
 }
 
 func runCli(t *testing.T, ex Executor, args []string) (int, string, string) {
@@ -656,6 +668,114 @@ func TestCliTargetsExecutorError(t *testing.T) {
 		t.Fatal("Run(targets) with executor error: exit = 0, want non-zero")
 	}
 	if !strings.Contains(errOut, "mdots.toml not found") {
+		t.Errorf("stderr should contain executor error, got %q", errOut)
+	}
+}
+
+// Seam: CLIコマンド境界 (add 登録委譲)
+// 位置引数1件の委譲・成功文面・引数なし/余剰/未知フラグ拒否・実行エラーの
+// 外部挙動のみを検証する。実FSには触れない。
+func TestCliGlobalHelpContainsAdd(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, out, _ := runCli(t, ex, []string{"--help"})
+	if code != 0 {
+		t.Fatalf("Run(--help) exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "add") {
+		t.Errorf("global help should contain add, got %q", out)
+	}
+}
+
+func TestCliAddDispatches(t *testing.T) {
+	ex := &fakeExecutor{addKey: "~/.vimrc", addSrc: "dotfiles/.vimrc"}
+	code, out, _ := runCli(t, ex, []string{"add", "~/.vimrc"})
+	if code != 0 {
+		t.Fatalf("Run(add ~/.vimrc) exit = %d, want 0", code)
+	}
+	if ex.addCalls != 1 {
+		t.Fatalf("Add calls = %d, want 1", ex.addCalls)
+	}
+	if ex.addDest != "~/.vimrc" {
+		t.Errorf("Add dest = %q, want %q", ex.addDest, "~/.vimrc")
+	}
+	if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "dotfiles/.vimrc") {
+		t.Errorf("output should contain key and src in one line, got %q", out)
+	}
+	if strings.Count(strings.TrimSuffix(out, "\n"), "\n") != 0 {
+		t.Errorf("output should be one line, got %q", out)
+	}
+}
+
+func TestCliAddHelp(t *testing.T) {
+	for _, args := range [][]string{{"add", "--help"}, {"add", "-h"}} {
+		ex := &fakeExecutor{}
+		code, out, _ := runCli(t, ex, args)
+		if code != 0 {
+			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
+		}
+		for _, want := range []string{"USAGE:", "add"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
+			}
+		}
+		if ex.addCalls != 0 {
+			t.Errorf("Run(%v): Add must not run on --help", args)
+		}
+	}
+}
+
+func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
+	t.Run("引数なしは拒否", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, []string{"add"})
+		if code == 0 {
+			t.Error("Run(add): exit = 0, want non-zero")
+		}
+		if ex.addCalls != 0 {
+			t.Error("Add must not run without args")
+		}
+	})
+	t.Run("余剰は拒否", func(t *testing.T) {
+		ex := &fakeExecutor{}
+		code, _, errOut := runCli(t, ex, []string{"add", "~/.a", "~/.b"})
+		if code == 0 {
+			t.Error("Run(add a b): exit = 0, want non-zero")
+		}
+		if !strings.Contains(errOut, "unknown argument: ~/.b") {
+			t.Errorf("stderr should contain unknown argument, got %q", errOut)
+		}
+		if ex.addCalls != 0 {
+			t.Error("Add must not run with extra args")
+		}
+	})
+}
+
+func TestCliAddRejectsFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"add", "--target", "win", "~/.vimrc"},
+		{"add", "--dry-run", "~/.vimrc"},
+		{"add", "--color=always", "~/.vimrc"},
+		{"add", "--unknown", "~/.vimrc"},
+		{"add", "~/.vimrc", "--unknown"},
+	} {
+		ex := &fakeExecutor{}
+		code, _, _ := runCli(t, ex, args)
+		if code == 0 {
+			t.Errorf("Run(%v): exit = 0, want non-zero", args)
+		}
+		if ex.addCalls != 0 {
+			t.Errorf("Run(%v): Add must not run with flags", args)
+		}
+	}
+}
+
+func TestCliAddExecutorError(t *testing.T) {
+	ex := &fakeExecutor{addErr: errors.New("entries[\"~/.vimrc\"]: already registered")}
+	code, _, errOut := runCli(t, ex, []string{"add", "~/.vimrc"})
+	if code == 0 {
+		t.Fatal("Run(add) with executor error: exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "already registered") {
 		t.Errorf("stderr should contain executor error, got %q", errOut)
 	}
 }
