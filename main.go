@@ -55,7 +55,58 @@ func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 func (cliExecutor) Targets(cwd string) ([]string, error) { return runTargets(cwd) }
 
 func (cliExecutor) Add(cwd, dest string) (string, string, error) {
-	return "", "", fmt.Errorf("add: not implemented")
+	return runAdd(cwd, dest)
+}
+
+// runAdd は未登録の既存ファイルを新規Entryとして登録する。
+// Store発見（カレント直下のみ）→dest正規化→src算出→dest存在・ファイル確認→
+// Store側src不在確認→素のsrc形式で登録（overrideは書かない）→保存の順に行い、
+// ファイルのコピーは行わない。回収は pull が行う。
+// いずれかの検証で失敗したときは登録せず、mdots.tomlを変更しない。
+func runAdd(cwd, rawDest string) (string, string, error) {
+	store, err := config.FindStore(cwd)
+	if err != nil {
+		return "", "", err
+	}
+	key, err := config.NormalizeDest(rawDest)
+	if err != nil {
+		return "", "", err
+	}
+	src, err := config.SrcForDest(key)
+	if err != nil {
+		return "", "", err
+	}
+	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
+	if err != nil {
+		return "", "", err
+	}
+	destPath, err := config.ExpandDest(key)
+	if err != nil {
+		return "", "", err
+	}
+	destInfo, destErr := os.Stat(destPath)
+	if destErr != nil {
+		return "", "", fmt.Errorf("add %s: %w", key, destErr)
+	}
+	if destInfo.IsDir() {
+		return "", "", fmt.Errorf("add %s: dest is a directory: %s", key, destPath)
+	}
+	srcPath := filepath.Join(store, src)
+	if srcInfo, srcErr := os.Stat(srcPath); srcErr == nil {
+		if srcInfo.IsDir() {
+			return "", "", fmt.Errorf("add %s: src is a directory: %s", key, src)
+		}
+		return "", "", fmt.Errorf("add %s: src already exists in Store: %s", key, src)
+	} else if !os.IsNotExist(srcErr) {
+		return "", "", fmt.Errorf("add %s: %w", key, srcErr)
+	}
+	if err := cfg.Add(key, src); err != nil {
+		return "", "", err
+	}
+	if err := cfg.Save(filepath.Join(store, "mdots.toml")); err != nil {
+		return "", "", err
+	}
+	return key, src, nil
 }
 
 // resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、

@@ -29,6 +29,9 @@ mdots init
 mdots push
 mdots pull
 
+# 未登録の既存ファイルを新規Entryとして登録する（取り込みはpullが行う）
+mdots add ~/.vimrc
+
 # Target付きで切り替え
 mdots push --target win
 mdots pull --target win
