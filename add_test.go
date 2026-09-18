@@ -81,6 +81,75 @@ func TestAddEndToEndRegistersWithoutCopying(t *testing.T) {
 	}
 }
 
+// Seam: CLIコマンド境界 (mdots add --target の実行系・E2E)
+// targets形式での登録・文面・pull回収を外部挙動で検証する。
+func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
+	store, _ := setupAddEnv(t,
+		nil,
+		map[string]string{".vimrc": "set number\n"},
+		"[entries]\n",
+	)
+
+	var out, errOut bytes.Buffer
+	if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code != 0 {
+		t.Fatalf("run(add --target win ~/.vimrc) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "~/.vimrc") || !strings.Contains(out.String(), "win") || !strings.Contains(out.String(), "dotfiles/win/.vimrc") {
+		t.Errorf("stdout should contain key, target and src, got %q", out.String())
+	}
+	body := readTomlForAddTest(t, store)
+	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "win") || !strings.Contains(body, "dotfiles/win/.vimrc") {
+		t.Errorf("mdots.toml should contain targets Entry, got:\n%s", body)
+	}
+	if strings.Contains(body, "override") {
+		t.Errorf("added Entry must not write override, got:\n%s", body)
+	}
+	if _, err := os.Stat(filepath.Join(store, "dotfiles", "win", ".vimrc")); err == nil {
+		t.Error("Store src must NOT be created by add --target (pull collects it)")
+	}
+	if code := run([]string{"pull", "--target", "win"}, store); code != 0 {
+		t.Fatalf("run(pull --target win) after add exit = %d, want 0", code)
+	}
+	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "win", ".vimrc"))
+	if err != nil {
+		t.Fatalf("store read error after pull --target: %v", err)
+	}
+	if string(got) != "set number\n" {
+		t.Errorf("store content = %q, want %q", got, "set number\n")
+	}
+}
+
+// Seam: CLIコマンド境界 (mdots add --target の追記マージ・E2E)
+// targets形式で別Targetを追記し、pullで回収できる外部挙動を検証する。
+func TestAddEndToEndWithTargetMergesNewTarget(t *testing.T) {
+	store, _ := setupAddEnv(t,
+		nil,
+		map[string]string{".vimrc": "set number\n"},
+		"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
+	)
+	var out, errOut bytes.Buffer
+	if code := runWithWriters([]string{"add", "--target", "wsl", "~/.vimrc"}, store, &out, &errOut); code != 0 {
+		t.Fatalf("run(add --target wsl) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "wsl") || !strings.Contains(out.String(), "dotfiles/wsl/.vimrc") {
+		t.Errorf("stdout should contain target and src, got %q", out.String())
+	}
+	body := readTomlForAddTest(t, store)
+	if !strings.Contains(body, "win") || !strings.Contains(body, "wsl") {
+		t.Errorf("mdots.toml should contain both targets, got:\n%s", body)
+	}
+	if code := run([]string{"pull", "--target", "wsl"}, store); code != 0 {
+		t.Fatalf("run(pull --target wsl) after merge exit = %d, want 0", code)
+	}
+	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "wsl", ".vimrc"))
+	if err != nil {
+		t.Fatalf("store read error after pull --target wsl: %v", err)
+	}
+	if string(got) != "set number\n" {
+		t.Errorf("store content = %q, want %q", got, "set number\n")
+	}
+}
+
 func TestAddEndToEndPullCollectsAfterAdd(t *testing.T) {
 	store, _ := setupAddEnv(t,
 		nil,
@@ -138,6 +207,41 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 		}
 		if errOut.String() == "" {
 			t.Error("stderr should not be empty on duplicate")
+		}
+		if got := readTomlForAddTest(t, store); got != before {
+			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
+		}
+	})
+
+	t.Run("素のsrc済みへのtarget追加は失敗し不変", func(t *testing.T) {
+		store, _ := setupAddEnv(t,
+			nil,
+			map[string]string{".vimrc": "x\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
+		)
+		before := readTomlForAddTest(t, store)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code == 0 {
+			t.Fatal("run(add --target registered): exit = 0, want non-zero")
+		}
+		if errOut.String() == "" {
+			t.Error("stderr should not be empty on duplicate with target")
+		}
+		if got := readTomlForAddTest(t, store); got != before {
+			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
+		}
+	})
+
+	t.Run("同一targetの再登録は失敗し不変", func(t *testing.T) {
+		store, _ := setupAddEnv(t,
+			nil,
+			map[string]string{".vimrc": "x\n"},
+			"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
+		)
+		before := readTomlForAddTest(t, store)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code == 0 {
+			t.Fatal("run(add --target duplicate): exit = 0, want non-zero")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)

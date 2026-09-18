@@ -391,6 +391,26 @@ func SrcForDest(normalizedDest string) (string, error) {
 	return "", fmt.Errorf("dest must be ~/...: %q", normalizedDest)
 }
 
+// SrcForDestWithTarget は正規化済み dest と Target から Store 相対の src を算出する。
+// target 空時は SrcForDest と同じ。target 指定時は dotfiles/<target>/... に写像する。
+// ~ 自体は dotfiles/<target> に写像する。
+func SrcForDestWithTarget(normalizedDest, target string) (string, error) {
+	if target == "" {
+		return SrcForDest(normalizedDest)
+	}
+	if normalizedDest == "~" {
+		return "dotfiles/" + target, nil
+	}
+	if strings.HasPrefix(normalizedDest, "~/") {
+		rest := normalizedDest[2:]
+		if rest == "" {
+			return "dotfiles/" + target, nil
+		}
+		return "dotfiles/" + target + "/" + rest, nil
+	}
+	return "", fmt.Errorf("dest must be ~/...: %q", normalizedDest)
+}
+
 // Add は未登録の配置先を素の src 形式で新規 Entry として登録する。
 // 既存 dest はエラーを返し、override は書かない（省略時 true として解決される）。
 func (c *Config) Add(dest, src string) error {
@@ -411,9 +431,49 @@ func (c *Config) Add(dest, src string) error {
 	return nil
 }
 
+// AddTarget は配置先を targets 形式で登録する。
+// dest 未登録なら新規 Entry を作り、targets 形式で登録済みかつ指定 Target が
+// 未登録なら追記マージする。素の src 形式で登録済み、または同一 Target が
+// 登録済みならエラーを返す。
+// override は書かない（省略時 true として解決される）。
+func (c *Config) AddTarget(dest, target, src string) error {
+	if dest == "" {
+		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+	}
+	if target == "" {
+		return fmt.Errorf("entries[%q]: target must not be empty", dest)
+	}
+	if src == "" {
+		return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, target)
+	}
+	if c.Entries == nil {
+		c.Entries = map[string]EntryValue{}
+	}
+	s := src
+	if existing, ok := c.Entries[dest]; ok {
+		if existing.Src != nil || existing.Targets == nil {
+			return fmt.Errorf("entries[%q]: already registered", dest)
+		}
+		if _, ok := (*existing.Targets)[target]; ok {
+			return fmt.Errorf("entries[%q]: already registered", dest)
+		}
+		merged := make(map[string]TargetValue, len(*existing.Targets)+1)
+		for name, tv := range *existing.Targets {
+			merged[name] = tv
+		}
+		merged[target] = TargetValue{Src: &s}
+		c.Entries[dest] = EntryValue{Targets: &merged}
+		return nil
+	}
+	c.Entries[dest] = EntryValue{Targets: &map[string]TargetValue{target: {Src: &s}}}
+	return nil
+}
+
 // Save は Config 全体をテーブル形式で保存する。
-// [entries] 親ヘッダ行は出さず、インデントも付けない。
-// 生成物は Load で読みに戻せる（ヘッダあり・なし・インライン・targets・override 混在）。
+// インデントは付けない。値を持たない空のテーブルヘッダ
+// （[entries] を含む中間ヘッダ：直後が次のヘッダまたは末尾）は出さない。
+// TOMLでは [a.b.c] だけで親が暗黙定義されるため、生成物は Load で読みに戻せる
+// （ヘッダあり・なし・インライン・targets・override 混在）。
 func (c Config) Save(path string) error {
 	if err := c.Validate(); err != nil {
 		return err
@@ -424,11 +484,42 @@ func (c Config) Save(path string) error {
 	if err := enc.Encode(c); err != nil {
 		return err
 	}
-	out := buf.String()
-	out = strings.TrimPrefix(out, "[entries]\n")
-	out = strings.TrimPrefix(out, "[entries]")
+	out := stripEmptyTableHeaders(buf.String())
 	if out != "" && !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
 	return os.WriteFile(path, []byte(out), 0o644)
+}
+
+// stripEmptyTableHeaders は値行を持たないテーブルヘッダ行を取り除く。
+// ヘッダ行の直後が次のヘッダ行または末尾の場合、そのヘッダは空とみなす。
+// キー行が1つでも続くヘッダは残す（例: override を持つ親テーブル）。
+func stripEmptyTableHeaders(out string) string {
+	lines := strings.Split(out, "\n")
+	var kept []string
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !isTableHeader(trimmed) {
+			kept = append(kept, line)
+			continue
+		}
+		nextIsHeaderOrEnd := true
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				continue
+			}
+			nextIsHeaderOrEnd = isTableHeader(strings.TrimSpace(next))
+			break
+		}
+		if nextIsHeaderOrEnd {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// isTableHeader は TOML のテーブルヘッダ行かを報告する。
+func isTableHeader(line string) bool {
+	return strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")
 }

@@ -25,7 +25,7 @@ type Executor interface {
 	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
 	Init(cwd string) error
 	Targets(cwd string) ([]string, error)
-	Add(cwd, dest string) (string, string, error)
+	Add(cwd, dest, target string) (string, string, error)
 }
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -148,8 +148,11 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.targetsAction,
 			},
 			{
-				Name:   "add",
-				Usage:  "未登録の既存ファイルを新規Entryとして登録する",
+				Name:  "add",
+				Usage: "未登録の既存ファイルを新規Entryとして登録する",
+				Flags: []cliv3.Flag{
+					targetFlag(),
+				},
 				Action: r.addAction,
 			},
 		},
@@ -272,11 +275,19 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 	if args.Len() > 1 {
 		return r.argError(args.Get(1))
 	}
-	key, src, err := r.exec.Add(r.cwd, dest)
+	target, err := r.targetOf(cmd)
+	if err != nil {
+		return err
+	}
+	key, src, err := r.exec.Add(r.cwd, dest, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
-	fmt.Fprintf(r.stdout, "added %s (src: %s)\n", key, src)
+	if target == "" {
+		fmt.Fprintf(r.stdout, "added %s (src: %s)\n", key, src)
+		return nil
+	}
+	fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", key, target, src)
 	return nil
 }
