@@ -60,6 +60,54 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// Seam: config パッケージ公開境界 (Target 一覧)
+// 全Entryのtargetsキーを集約し重複排除・ソートして返す外部挙動を検証する。
+// 素Entryは無視する。未定義時は空を返す。
+func TestTargets(t *testing.T) {
+	t.Run("複数Entryに分散したTargetを重複排除・ソートして返す", func(t *testing.T) {
+		body := "[entries]\n" +
+			`"~/.c" = { targets = { wsl = { src = "c-wsl" }, win = { src = "c-win" } } }` + "\n" +
+			`"~/.b" = { targets = { win = { src = "b-win" }, linux = { src = "b-linux" } } }` + "\n" +
+			`"~/.a" = { src = "a" }` + "\n"
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		got := cfg.Targets()
+		want := []string{"linux", "win", "wsl"}
+		if len(got) != len(want) {
+			t.Fatalf("Targets() = %q, want %q", got, want)
+		}
+		for i, w := range want {
+			if got[i] != w {
+				t.Errorf("index %d: got %q, want %q", i, got[i], w)
+			}
+		}
+	})
+
+	t.Run("Target未定義時は空を返す", func(t *testing.T) {
+		body := "[entries]\n" +
+			`"~/.a" = { src = "a" }` + "\n"
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		if got := cfg.Targets(); len(got) != 0 {
+			t.Errorf("Targets() = %q, want empty", got)
+		}
+	})
+}
+
 // Seam: config パッケージ公開境界 (新形式の読込)
 // 配置先キー・{src}/{targets}排他・Targetキー化の読込を外部挙動で検証する。
 func TestLoadNewFormat(t *testing.T) {

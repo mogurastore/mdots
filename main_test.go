@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -280,9 +282,69 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 // Store 未発見時の失敗は共通。文言自体は設定境界テストが保証する。
 func TestCommandsWithoutStoreFail(t *testing.T) {
 	empty := t.TempDir()
-	for _, args := range [][]string{{"push"}, {"pull"}, {"push", "--dry-run"}, {"pull", "--dry-run"}} {
+	for _, args := range [][]string{{"push"}, {"pull"}, {"push", "--dry-run"}, {"pull", "--dry-run"}, {"targets"}} {
 		if code := run(args, empty); code == 0 {
 			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
 		}
 	}
+}
+
+// Seam: CLIコマンド境界 (mdots targets の配線代表例)
+// 実FS上の Store を用い、runWithWriters 経由の外部挙動のみを検証する。
+// 集約・ソートの網羅は設定境界テストが保証する。
+func TestTargetsEndToEnd(t *testing.T) {
+	t.Run("分散したTargetを重複排除・ソートして1行1名で出す", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, nil,
+			"[entries]\n"+
+				`"~/.c" = { targets = { wsl = { src = "c-wsl" }, win = { src = "c-win" } } }`+"\n"+
+				`"~/.b" = { targets = { win = { src = "b-win" } } }`+"\n"+
+				`"~/.a" = { src = "a" }`+"\n",
+		)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"targets"}, store, &out, &errOut); code != 0 {
+			t.Fatalf("run(targets) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+		}
+		if out.String() != "win\nwsl\n" {
+			t.Errorf("stdout = %q, want %q", out.String(), "win\nwsl\n")
+		}
+	})
+
+	t.Run("Target未定義で空出力・exit 0", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, nil,
+			"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+		)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"targets"}, store, &out, &errOut); code != 0 {
+			t.Fatalf("run(targets) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+		}
+		if out.String() != "" {
+			t.Errorf("stdout = %q, want empty", out.String())
+		}
+	})
+
+	t.Run("toml不正でstderr＋非ゼロ終了", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, nil,
+			"[entries]\n\"~/.a\" = {}\n",
+		)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"targets"}, store, &out, &errOut); code == 0 {
+			t.Error("run(targets) with invalid toml: exit = 0, want non-zero")
+		}
+		if errOut.String() == "" {
+			t.Error("stderr should not be empty on invalid toml")
+		}
+	})
+
+	t.Run("余剰引数でunknown argument＋非ゼロ終了", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, nil,
+			"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+		)
+		var out, errOut bytes.Buffer
+		if code := runWithWriters([]string{"targets", "extra"}, store, &out, &errOut); code == 0 {
+			t.Error("run(targets extra): exit = 0, want non-zero")
+		}
+		if !strings.Contains(errOut.String(), "unknown argument: extra") {
+			t.Errorf("stderr should contain unknown argument, got %q", errOut.String())
+		}
+	})
 }

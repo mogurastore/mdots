@@ -28,6 +28,10 @@ _Avoid_: capture, import
 Storeにmdots.toml雛形を作る操作。
 _Avoid_: create, new, setup
 
+**targets**:
+定義済みTarget名の一覧を表示する操作。
+_Avoid_: list
+
 **dry-run**:
 push/pullで書き込まず差分を出力する操作。方向は操作のコピー方向に合わせる。
 _Avoid_: diff, preview
