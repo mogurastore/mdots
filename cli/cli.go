@@ -16,7 +16,7 @@ import (
 	cliv3 "github.com/urfave/cli/v3"
 )
 
-// Executor は push/pull/init/targets の内部実行系への委譲口である。
+// Executor は push/pull/init/targets/add の内部実行系への委譲口である。
 // 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
 type Executor interface {
 	Push(cwd, target string) error
@@ -25,6 +25,7 @@ type Executor interface {
 	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
 	Init(cwd string) error
 	Targets(cwd string) ([]string, error)
+	Add(cwd, dest string) (string, string, error)
 }
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -146,6 +147,11 @@ func (r *runner) newCommand() *cliv3.Command {
 				Usage:  "定義済みTarget名の一覧を表示する",
 				Action: r.targetsAction,
 			},
+			{
+				Name:   "add",
+				Usage:  "未登録の既存ファイルを新規Entryとして登録する",
+				Action: r.addAction,
+			},
 		},
 	}
 }
@@ -253,5 +259,24 @@ func (r *runner) targetsAction(_ context.Context, cmd *cliv3.Command) error {
 	for _, name := range names {
 		fmt.Fprintln(r.stdout, name)
 	}
+	return nil
+}
+
+func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
+	args := cmd.Args()
+	if !args.Present() {
+		fmt.Fprintln(r.stderr, "missing argument")
+		return &exitError{code: 1}
+	}
+	dest := args.First()
+	if args.Len() > 1 {
+		return r.argError(args.Get(1))
+	}
+	key, src, err := r.exec.Add(r.cwd, dest)
+	if err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
+	}
+	fmt.Fprintf(r.stdout, "added %s (src: %s)\n", key, src)
 	return nil
 }

@@ -54,6 +54,10 @@ func (cliExecutor) Init(cwd string) error { return runInit(cwd) }
 
 func (cliExecutor) Targets(cwd string) ([]string, error) { return runTargets(cwd) }
 
+func (cliExecutor) Add(cwd, dest string) (string, string, error) {
+	return "", "", fmt.Errorf("add: not implemented")
+}
+
 // resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、
 // push/pull で共有する。解決規則は config.Resolve に寄せる
 // （指定なしは常時＋一致Targetのみ、配置先ソート順）。
