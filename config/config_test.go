@@ -513,6 +513,101 @@ func TestSrcForDest(t *testing.T) {
 	}
 }
 
+// Seam: config パッケージ公開境界 (add向けsrc算出・target付き)
+// dotfiles/<target>/... への写像の外部挙動を検証する。
+func TestSrcForDestWithTarget(t *testing.T) {
+	if got, err := SrcForDestWithTarget("~/.vimrc", "win"); err != nil || got != "dotfiles/win/.vimrc" {
+		t.Errorf("SrcForDestWithTarget(~/.vimrc, win) = %q, %v; want %q, nil", got, err, "dotfiles/win/.vimrc")
+	}
+	if got, err := SrcForDestWithTarget("~/.config/helix/config.toml", "wsl"); err != nil || got != "dotfiles/wsl/.config/helix/config.toml" {
+		t.Errorf("SrcForDestWithTarget深い階層 = %q, %v", got, err)
+	}
+	if got, err := SrcForDestWithTarget("~", "win"); err != nil || got != "dotfiles/win" {
+		t.Errorf("SrcForDestWithTarget(~, win) = %q, %v; want %q, nil", got, err, "dotfiles/win")
+	}
+	if got, err := SrcForDestWithTarget("~/.vimrc", ""); err != nil || got != "dotfiles/.vimrc" {
+		t.Errorf("SrcForDestWithTarget空targetは素と同じ = %q, %v", got, err)
+	}
+	if _, err := SrcForDestWithTarget("/etc/hosts", "win"); err == nil {
+		t.Error("SrcForDestWithTarget(絶対パス): エラー expected, got nil")
+	}
+}
+
+// Seam: config パッケージ公開境界 (add向け登録・target付き)
+// targets形式での登録・別target追記・同一target/素のsrc済みエラー・
+// overrideを書かない外部挙動を検証する。
+func TestAddTargetRegisters(t *testing.T) {
+	var cfg Config
+	if err := cfg.AddTarget("~/.vimrc", "win", "dotfiles/win/.vimrc"); err != nil {
+		t.Fatalf("AddTarget error: %v", err)
+	}
+	got := cfg.Resolve("win")
+	if len(got) != 1 || got[0].Dest != "~/.vimrc" || got[0].Src != "dotfiles/win/.vimrc" || !got[0].Override {
+		t.Errorf("登録後の解決不正: %+v", got)
+	}
+	if got := cfg.Resolve(""); len(got) != 0 {
+		t.Errorf("無指定解決でtarget付きは出ない expected, got %+v", got)
+	}
+	if got := cfg.Resolve("wsl"); len(got) != 0 {
+		t.Errorf("不一致Targetで出ない expected, got %+v", got)
+	}
+	// 別targetは追記マージして成功する。
+	if err := cfg.AddTarget("~/.vimrc", "wsl", "dotfiles/wsl/.vimrc"); err != nil {
+		t.Fatalf("別target追記 error: %v", err)
+	}
+	if got := cfg.Resolve("win"); len(got) != 1 || got[0].Src != "dotfiles/win/.vimrc" {
+		t.Errorf("追記後のwin解決不正: %+v", got)
+	}
+	if got := cfg.Resolve("wsl"); len(got) != 1 || got[0].Src != "dotfiles/wsl/.vimrc" {
+		t.Errorf("追記後のwsl解決不正: %+v", got)
+	}
+	if err := cfg.AddTarget("~/.vimrc", "win", "dotfiles/win/.vimrc"); err == nil {
+		t.Error("同一targetの再登録: エラー expected, got nil")
+	} else if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("同一targetエラー文言不正: got %q", err.Error())
+	}
+	var cfg2 Config
+	if err := cfg2.Add("~/.a", "dotfiles/.a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg2.AddTarget("~/.a", "win", "dotfiles/win/.a"); err == nil {
+		t.Error("素のsrc済みへのtarget追加: エラー expected, got nil")
+	}
+	for _, tc := range []struct{ dest, target, src string }{
+		{"", "win", "a"},
+		{"~/.a", "", "a"},
+		{"~/.a", "win", ""},
+	} {
+		var c Config
+		if err := c.AddTarget(tc.dest, tc.target, tc.src); err == nil {
+			t.Errorf("AddTarget(%q,%q,%q): エラー expected, got nil", tc.dest, tc.target, tc.src)
+		}
+	}
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(p); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "override") {
+		t.Errorf("targets登録でoverrideを書かない expected, got:\n%s", data)
+	}
+	back, err := Load(p)
+	if err != nil {
+		t.Fatalf("保存物のLoad error: %v", err)
+	}
+	if got := back.Resolve("win"); len(got) != 1 || got[0].Src != "dotfiles/win/.vimrc" {
+		t.Errorf("往復後のwin解決不正: %+v", got)
+	}
+	if got := back.Resolve("wsl"); len(got) != 1 || got[0].Src != "dotfiles/wsl/.vimrc" {
+		t.Errorf("往復後のwsl解決不正: %+v", got)
+	}
+}
+
 // Seam: config パッケージ公開境界 (add向け登録)
 // 素のsrc形式での登録・既存destエラー・overrideを書かない外部挙動を検証する。
 func TestAddRegistersPlainSrc(t *testing.T) {
@@ -547,6 +642,35 @@ func TestAddRegistersPlainSrc(t *testing.T) {
 	}
 	if strings.Contains(string(data), "override") {
 		t.Errorf("素のsrc登録でoverrideを書かない expected, got:\n%s", data)
+	}
+}
+
+// Seam: config パッケージ公開境界 (targets保存の空親テーブル省略)
+// 空の中間テーブルヘッダを出さない外部挙動を完全一致で検証する。
+func TestSaveOmitsEmptyParentHeaders(t *testing.T) {
+	var cfg Config
+	if err := cfg.AddTarget("~/.gitconfig", "wsl", "dotfiles/wsl/.gitconfig"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := cfg.Save(p); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[entries.\"~/.gitconfig\".targets.wsl]\nsrc = \"dotfiles/wsl/.gitconfig\"\n"
+	if string(data) != want {
+		t.Errorf("空親テーブル省略の完全一致失敗:\ngot:\n%s\nwant:\n%s", data, want)
+	}
+	back, err := Load(p)
+	if err != nil {
+		t.Fatalf("省略形のLoad error: %v", err)
+	}
+	if got := back.Resolve("wsl"); len(got) != 1 || got[0].Src != "dotfiles/wsl/.gitconfig" {
+		t.Errorf("省略形の往復後解決不正: %+v", got)
 	}
 }
 

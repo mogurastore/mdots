@@ -39,11 +39,12 @@ type fakeExecutor struct {
 	targetsOut   []string
 	targetsErr   error
 
-	addCalls int
-	addDest  string
-	addKey   string
-	addSrc   string
-	addErr   error
+	addCalls  int
+	addDest   string
+	addTarget string
+	addKey    string
+	addSrc    string
+	addErr    error
 }
 
 func (f *fakeExecutor) Push(cwd, target string) error {
@@ -84,9 +85,10 @@ func (f *fakeExecutor) Targets(cwd string) ([]string, error) {
 	return f.targetsOut, f.targetsErr
 }
 
-func (f *fakeExecutor) Add(cwd, dest string) (string, string, error) {
+func (f *fakeExecutor) Add(cwd, dest, target string) (string, string, error) {
 	f.addCalls++
 	f.addDest = dest
+	f.addTarget = target
 	return f.addKey, f.addSrc, f.addErr
 }
 
@@ -750,9 +752,50 @@ func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
 	})
 }
 
-func TestCliAddRejectsFlags(t *testing.T) {
+// Seam: CLIコマンド境界 (add --target 委譲)
+// --target/-t の解釈・空値拒否・成功文面の外部挙動を検証する。
+func TestCliAddWithTargetDispatches(t *testing.T) {
 	for _, args := range [][]string{
 		{"add", "--target", "win", "~/.vimrc"},
+		{"add", "--target=win", "~/.vimrc"},
+		{"add", "-t", "win", "~/.vimrc"},
+	} {
+		ex := &fakeExecutor{addKey: "~/.vimrc", addSrc: "dotfiles/win/.vimrc"}
+		code, out, _ := runCli(t, ex, args)
+		if code != 0 {
+			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
+		}
+		if ex.addCalls != 1 {
+			t.Fatalf("Run(%v): Add calls = %d, want 1", args, ex.addCalls)
+		}
+		if ex.addDest != "~/.vimrc" {
+			t.Errorf("Run(%v): Add dest = %q, want %q", args, ex.addDest, "~/.vimrc")
+		}
+		if ex.addTarget != "win" {
+			t.Errorf("Run(%v): Add target = %q, want %q", args, ex.addTarget, "win")
+		}
+		if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "win") || !strings.Contains(out, "dotfiles/win/.vimrc") {
+			t.Errorf("Run(%v): output should contain key, target and src, got %q", args, out)
+		}
+		if strings.Count(strings.TrimSuffix(out, "\n"), "\n") != 0 {
+			t.Errorf("Run(%v): output should be one line, got %q", args, out)
+		}
+	}
+}
+
+func TestCliAddRejectsEmptyTarget(t *testing.T) {
+	ex := &fakeExecutor{}
+	code, _, _ := runCli(t, ex, []string{"add", "--target=", "~/.vimrc"})
+	if code == 0 {
+		t.Error("Run(add --target=): exit = 0, want non-zero")
+	}
+	if ex.addCalls != 0 {
+		t.Error("Add must not run with empty target")
+	}
+}
+
+func TestCliAddRejectsFlags(t *testing.T) {
+	for _, args := range [][]string{
 		{"add", "--dry-run", "~/.vimrc"},
 		{"add", "--color=always", "~/.vimrc"},
 		{"add", "--unknown", "~/.vimrc"},
