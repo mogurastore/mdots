@@ -294,17 +294,20 @@ func (e Entry) ExpandedDest() (string, error) {
 // Template は init が作る mdots.toml 雛形である。
 // サンプルはすべてコメントアウト済み。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
+// 記法は add の Save と同じテーブル形式に寄せる（インライン形式は使わない）。
 const Template = `[entries]
-# "~/.vimrc" = { src = "vimrc" }
+# [entries."~/.vimrc"]
+# src = "vimrc"
 #
-# "~/.bashrc" = { src = "bashrc", override = false }
+# [entries."~/.bashrc"]
+# src = "bashrc"
+# override = false
 #
-# "~/.gitconfig" = {
-#   targets = {
-#     win = { src = "win/.gitconfig" },
-#     wsl = { src = "wsl/.gitconfig", override = false },
-#   },
-# }
+# [entries."~/.gitconfig".targets.win]
+# src = "win/.gitconfig"
+# [entries."~/.gitconfig".targets.wsl]
+# src = "wsl/.gitconfig"
+# override = false
 `
 
 // Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。

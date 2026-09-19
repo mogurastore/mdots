@@ -46,18 +46,20 @@ mdots pull --dry-run
 
 ## 設定例（mdots.toml）
 
-配置先をキーにする。
+配置先をテーブルヘッダにする（add の保存と同じテーブル形式）。
 
 ```toml
-[entries]
-"~/.vimrc" = { src = "vimrc" }
+[entries."~/.vimrc"]
+src = "vimrc"
 
-"~/.bashrc" = { src = "bashrc", override = false }
+[entries."~/.bashrc"]
+src = "bashrc"
+override = false
 
-"~/.gitconfig" = {
-  targets = {
-    win = { src = "win/.gitconfig" },
-    wsl = { src = "wsl/.gitconfig", override = false },
-  },
-}
+[entries."~/.gitconfig".targets.win]
+src = "win/.gitconfig"
+
+[entries."~/.gitconfig".targets.wsl]
+src = "wsl/.gitconfig"
+override = false
 ```
