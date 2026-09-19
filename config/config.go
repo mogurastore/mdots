@@ -297,16 +297,16 @@ func (e Entry) ExpandedDest() (string, error) {
 // 記法は add の Save と同じテーブル形式に寄せる（インライン形式は使わない）。
 const Template = `[entries]
 # [entries."~/.vimrc"]
-# src = "vimrc"
+# src = "dotfiles/.vimrc"
 #
 # [entries."~/.bashrc"]
-# src = "bashrc"
+# src = "dotfiles/.bashrc"
 # override = false
 #
 # [entries."~/.gitconfig".targets.win]
-# src = "win/.gitconfig"
+# src = "dotfiles/win/.gitconfig"
 # [entries."~/.gitconfig".targets.wsl]
-# src = "wsl/.gitconfig"
+# src = "dotfiles/wsl/.gitconfig"
 # override = false
 `
 

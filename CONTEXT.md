@@ -43,3 +43,6 @@ _Avoid_: diff, preview
 **override**:
 Entryのコピー先に既存ファイルがある場合の上書き可否。falseは既存を保護し新規作成のみ行う。
 _Avoid_: overwrite, force
+
+**dotfiles**:
+Store直下でaddが生成する既定のsrc配置 (例: dotfiles/.vimrc)。必須ではなく推奨で、他のsrcも読み書きできる。
