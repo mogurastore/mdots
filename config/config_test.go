@@ -267,6 +267,7 @@ func TestExpandDest(t *testing.T) {
 // 空Store作成・既存ありエラー・生成物がLoadを通る外部挙動を検証する。
 // 雛形は新形式（配置先キー・{src}/{targets}排他・Targetキー化）のみを含み、
 // 旧形式の記法（[[entries]]・dest =・target配列・旧targets配列・common特別扱い）を含まない。
+// 記法は add の Save と同じテーブル形式とし、インライン形式は使わない。
 func TestInitCreatesTemplate(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Init(dir)
@@ -278,12 +279,12 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	for _, want := range []string{"[entries]", "src =", "targets", "win = ", `"~/`} {
+	for _, want := range []string{"[entries]", "src =", "targets", "targets.win", `"~/`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("template should contain %q, got:\n%s", want, body)
 		}
 	}
-	for _, old := range []string{"[[entries]]", "dest =", "common", "target = [", "target = \"", "{ target = "} {
+	for _, old := range []string{"[[entries]]", "dest =", "common", "target = [", "target = \"", "{ target = ", "= {"} {
 		if strings.Contains(body, old) {
 			t.Errorf("template must not contain old format %q, got:\n%s", old, body)
 		}
