@@ -59,8 +59,8 @@ func (cliExecutor) Add(cwd, dest, target string) (string, string, error) {
 }
 
 // runAdd は未登録の既存ファイルを新規Entryとして登録する。
-// Store発見（カレント直下のみ）→dest正規化→src算出→dest存在・ファイル確認→
-// Store側src不在確認→素のsrc形式またはtargets形式で登録（overrideは書かない）→保存の順に行い、
+// Store発見（カレント直下のみ）→dest正規化→src算出→Load→意味検査→
+// fragment生成→元ファイル追記→完成形再Load→atomic置換の順に行い、
 // ファイルのコピーは行わない。回収は pull が行う。
 // target 指定時は dotfiles/<target>/... に写像し、targets形式で登録する。
 // いずれかの検証で失敗したときは登録せず、mdots.tomlを変更しない。
@@ -107,13 +107,16 @@ func runAdd(cwd, rawDest, target string) (string, string, error) {
 		if err := cfg.Add(key, src); err != nil {
 			return "", "", err
 		}
+		if err := config.AppendPlainEntry(filepath.Join(store, "mdots.toml"), key, src); err != nil {
+			return "", "", err
+		}
 	} else {
 		if err := cfg.AddTarget(key, target, src); err != nil {
 			return "", "", err
 		}
-	}
-	if err := cfg.Save(filepath.Join(store, "mdots.toml")); err != nil {
-		return "", "", err
+		if err := config.AppendTargetEntry(filepath.Join(store, "mdots.toml"), key, target, src); err != nil {
+			return "", "", err
+		}
 	}
 	return key, src, nil
 }

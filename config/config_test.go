@@ -165,7 +165,8 @@ func TestLoadNewFormat(t *testing.T) {
 		}
 	})
 
-	t.Run("宣言順が逆でも解決は配置先ソート順", func(t *testing.T) {		dir := t.TempDir()
+	t.Run("宣言順が逆でも解決は配置先ソート順", func(t *testing.T) {
+		dir := t.TempDir()
 		p := filepath.Join(dir, "mdots.toml")
 		body := "[entries]\n" +
 			`"~/.z" = { src = "z" }` + "\n" +
@@ -195,14 +196,14 @@ func TestLoadNewFormat(t *testing.T) {
 // 排他違反・欠落・空を明確に失敗させる外部挙動を検証する。
 func TestLoadValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"srcとtargetsの併記は拒否": "[entries]\n\"~/.a\" = { src = \"a\", targets = { win = { src = \"b\" } } }\n",
-		"両方なしは拒否":           "[entries]\n\"~/.a\" = {}\n",
-		"空srcは拒否":           "[entries]\n\"~/.a\" = { src = \"\" }\n",
-		"空targetsは拒否":       "[entries]\n\"~/.a\" = { targets = {} }\n",
-		"空targetは拒否":        "[entries]\n\"~/.a\" = { targets = { \"\" = { src = \"a\" } } }\n",
-		"targets要素の空srcは拒否": "[entries]\n\"~/.a\" = { targets = { win = { src = \"\" } } }\n",
+		"srcとtargetsの併記は拒否":  "[entries]\n\"~/.a\" = { src = \"a\", targets = { win = { src = \"b\" } } }\n",
+		"両方なしは拒否":            "[entries]\n\"~/.a\" = {}\n",
+		"空srcは拒否":            "[entries]\n\"~/.a\" = { src = \"\" }\n",
+		"空targetsは拒否":        "[entries]\n\"~/.a\" = { targets = {} }\n",
+		"空targetは拒否":         "[entries]\n\"~/.a\" = { targets = { \"\" = { src = \"a\" } } }\n",
+		"targets要素の空srcは拒否":  "[entries]\n\"~/.a\" = { targets = { win = { src = \"\" } } }\n",
 		"targets要素のsrc欠落は拒否": "[entries]\n\"~/.a\" = { targets = { win = {} } }\n",
-		"空destは拒否":          "[entries]\n\"\" = { src = \"a\" }\n",
+		"空destは拒否":           "[entries]\n\"\" = { src = \"a\" }\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -447,11 +448,11 @@ func TestLoadOverrideResolves(t *testing.T) {
 // 不正値・未知フィールドを明確に失敗させる外部挙動を検証する。
 func TestLoadOverrideValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"配置先直下の文字列は拒否":       "[entries]\n\"~/.a\" = { src = \"a\", override = \"yes\" }\n",
+		"配置先直下の文字列は拒否":        "[entries]\n\"~/.a\" = { src = \"a\", override = \"yes\" }\n",
 		"配置先直下の数値は拒否":         "[entries]\n\"~/.a\" = { src = \"a\", override = 1 }\n",
-		"targets内の文字列は拒否":        "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", override = \"no\" } } }\n",
-		"配置先直下の未知フィールドは拒否": "[entries]\n\"~/.a\" = { src = \"a\", overwride = false }\n",
-		"targets内の未知フィールドは拒否":  "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", overide = false } } }\n",
+		"targets内の文字列は拒否":     "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", override = \"no\" } } }\n",
+		"配置先直下の未知フィールドは拒否":    "[entries]\n\"~/.a\" = { src = \"a\", overwride = false }\n",
+		"targets内の未知フィールドは拒否": "[entries]\n\"~/.a\" = { targets = { win = { src = \"a\", overide = false } } }\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -587,8 +588,14 @@ func TestAddTargetRegisters(t *testing.T) {
 
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(p); err != nil {
-		t.Fatalf("Save error: %v", err)
+	if err := os.WriteFile(p, []byte("[entries]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTargetEntry(p, "~/.vimrc", "win", "dotfiles/win/.vimrc"); err != nil {
+		t.Fatalf("Append error: %v", err)
+	}
+	if err := AppendTargetEntry(p, "~/.vimrc", "wsl", "dotfiles/wsl/.vimrc"); err != nil {
+		t.Fatalf("Append error: %v", err)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -634,8 +641,11 @@ func TestAddRegistersPlainSrc(t *testing.T) {
 
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(p); err != nil {
-		t.Fatalf("Save error: %v", err)
+	if err := os.WriteFile(p, []byte("[entries]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+		t.Fatalf("Append error: %v", err)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -646,17 +656,16 @@ func TestAddRegistersPlainSrc(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (targets保存の空親テーブル省略)
+// Seam: config パッケージ公開境界 (targets追記の空親テーブル省略)
 // 空の中間テーブルヘッダを出さない外部挙動を完全一致で検証する。
-func TestSaveOmitsEmptyParentHeaders(t *testing.T) {
-	var cfg Config
-	if err := cfg.AddTarget("~/.gitconfig", "wsl", "dotfiles/wsl/.gitconfig"); err != nil {
-		t.Fatal(err)
-	}
+func TestAppendOmitsEmptyParentHeaders(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(p); err != nil {
-		t.Fatalf("Save error: %v", err)
+	if err := os.WriteFile(p, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTargetEntry(p, "~/.gitconfig", "wsl", "dotfiles/wsl/.gitconfig"); err != nil {
+		t.Fatalf("Append error: %v", err)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -675,20 +684,19 @@ func TestSaveOmitsEmptyParentHeaders(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (add向け保存記法)
+// Seam: config パッケージ公開境界 (add向け追記記法)
 // テーブル形式・[entries]親ヘッダ行なし・インデントなしの完全一致を検証する。
-func TestSaveExactFormat(t *testing.T) {
-	var cfg Config
-	if err := cfg.Add("~/.vimrc", "dotfiles/.vimrc"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.Add("~/.bashrc", "dotfiles/.bashrc"); err != nil {
-		t.Fatal(err)
-	}
+func TestAppendExactFormat(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(p); err != nil {
-		t.Fatalf("Save error: %v", err)
+	if err := os.WriteFile(p, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendPlainEntry(p, "~/.bashrc", "dotfiles/.bashrc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+		t.Fatal(err)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -708,9 +716,9 @@ func TestSaveExactFormat(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (add向け保存の往復)
-// 保存物が既存読み込み（ヘッダあり・なし・インライン・targets・override混在）で読める外部挙動を検証する。
-func TestSaveRoundTripMixed(t *testing.T) {
+// Seam: config パッケージ公開境界 (add向け追記の往復)
+// 追記物が既存読み込み（ヘッダあり・なし・インライン・targets・override混在）で読める外部挙動を検証する。
+func TestAppendRoundTripMixed(t *testing.T) {
 	body := "[entries]\n" +
 		`"~/.a" = { src = "dotfiles/.a" }` + "\n" +
 		`"~/.b" = { src = "dotfiles/.b", override = false }` + "\n" +
@@ -728,8 +736,11 @@ func TestSaveRoundTripMixed(t *testing.T) {
 		t.Fatalf("Add error: %v", err)
 	}
 	dstPath := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(dstPath); err != nil {
-		t.Fatalf("Save error: %v", err)
+	if err := os.WriteFile(dstPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendPlainEntry(dstPath, "~/.d", "dotfiles/.d"); err != nil {
+		t.Fatalf("Append error: %v", err)
 	}
 	back, err := Load(dstPath)
 	if err != nil {
@@ -752,24 +763,23 @@ func TestSaveRoundTripMixed(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (add向け保存の特殊文字往復)
+// Seam: config パッケージ公開境界 (add向け追記の特殊文字往復)
 // 特殊文字を含むキーでも往復できる外部挙動を検証する。
-func TestSaveRoundTripSpecialChars(t *testing.T) {
+func TestAppendRoundTripSpecialChars(t *testing.T) {
 	dests := []string{`~/.config/a"b`, `~/a\b`, `~/sp ace`, `~/.config/#hash`}
-	var cfg Config
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mdots.toml")
+	if err := os.WriteFile(p, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range dests {
 		src, err := SrcForDest(d)
 		if err != nil {
 			t.Fatalf("SrcForDest(%q) error: %v", d, err)
 		}
-		if err := cfg.Add(d, src); err != nil {
-			t.Fatalf("Add(%q) error: %v", d, err)
+		if err := AppendPlainEntry(p, d, src); err != nil {
+			t.Fatalf("Append(%q) error: %v", d, err)
 		}
-	}
-	dir := t.TempDir()
-	p := filepath.Join(dir, "mdots.toml")
-	if err := cfg.Save(p); err != nil {
-		t.Fatalf("Save error: %v", err)
 	}
 	back, err := Load(p)
 	if err != nil {
@@ -793,6 +803,101 @@ func TestSaveRoundTripSpecialChars(t *testing.T) {
 			t.Errorf("%q: src = %q, want %q", d, *v.Src, wantSrc)
 		}
 	}
+}
+
+// Seam: config パッケージ公開境界 (fragment追記)
+// 元ファイル温存・末尾改行なし・targets追記マージ・特殊文字・mode継承・
+// 重複時不変を外部挙動で検証する。
+func TestAppendPreservesAndMerges(t *testing.T) {
+	t.Run("コメント温存して追記", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		before := "# c\n[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n"
+		if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		got := readFileForTest(t, p)
+		if !strings.HasPrefix(got, before) {
+			t.Errorf("既存バイト温存失敗:\nbefore:\n%s\ngot:\n%s", before, got)
+		}
+		back, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v", err)
+		}
+		if len(back.Entries) != 2 {
+			t.Fatalf("Entries = %d, want 2", len(back.Entries))
+		}
+	})
+	t.Run("末尾改行なしでも壊れない", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte("[entries]\n\"~/.a\" = { src = \"a\" }"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.b", "b"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		if _, err := Load(p); err != nil {
+			t.Fatalf("Load error: %v\n%s", err, readFileForTest(t, p))
+		}
+	})
+	t.Run("targets追記マージ", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		before := "[entries.\"~/.vimrc\".targets.win]\nsrc = \"dotfiles/win/.vimrc\"\n"
+		if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendTargetEntry(p, "~/.vimrc", "wsl", "dotfiles/wsl/.vimrc"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		back, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v\n%s", err, readFileForTest(t, p))
+		}
+		if got := back.Resolve("win"); len(got) != 1 {
+			t.Errorf("win消失: %+v", got)
+		}
+		if got := back.Resolve("wsl"); len(got) != 1 {
+			t.Errorf("wsl消失: %+v", got)
+		}
+	})
+	t.Run("特殊文字でも往復", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte("[entries]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dest := `~/.config/a"b`
+		src, _ := SrcForDest(dest)
+		if err := AppendPlainEntry(p, dest, src); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		back, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load error: %v\n%s", err, readFileForTest(t, p))
+		}
+		if _, ok := back.Entries[dest]; !ok {
+			t.Errorf("特殊文字キー消失: %q", dest)
+		}
+	})
+	t.Run("重複は失敗し不変", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		before := "[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+		if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err == nil {
+			t.Fatal("重複追記: エラー expected, got nil")
+		}
+		if got := readFileForTest(t, p); got != before {
+			t.Errorf("不変 expected:\nbefore:\n%s\ngot:\n%s", before, got)
+		}
+	})
 }
 
 func readFileForTest(t *testing.T, p string) string {
