@@ -219,28 +219,32 @@ func TestLoadValidationErrors(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (旧形式の明確な失敗)
-// 旧配列形式・旧配列Target・旧targets配列は読めず明確に失敗する外部挙動を検証する。
-func TestLoadRejectsOldFormat(t *testing.T) {
-	cases := map[string]string{
-		"旧[[entries]]配列は拒否": "[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n",
-		"旧target配列は拒否":      "[entries]\n\"~/.a\" = { src = \"a\", target = [\"win\"] }\n",
-		"旧target文字列は拒否":     "[entries]\n\"~/.a\" = { src = \"a\", target = \"win\" }\n",
-		"旧targets配列は拒否":     "[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"a\" }] }\n",
+// Seam: config パッケージ公開境界 (想定外形式の拒否)
+// rejectUnexpectedFormat が旧記法を含む想定外形式を明確に失敗させる外部挙動を検証する。
+// Validate の網羅は TestLoadValidationErrors に寄せ、ここでは形式レベルの拒否のみ扱う。
+func TestLoadRejectsUnexpectedFormat(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want string
+	}{
+		"旧[[entries]]配列は拒否": {"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n", "unknown field"},
+		"旧target配列は拒否":      {"[entries]\n\"~/.a\" = { src = \"a\", target = [\"win\"] }\n", "unknown field"},
+		"旧target文字列は拒否":     {"[entries]\n\"~/.a\" = { src = \"a\", target = \"win\" }\n", "unknown field"},
+		"旧targets配列は拒否":     {"[entries]\n\"~/.a\" = { targets = [{ target = \"win\", src = \"a\" }] }\n", "unknown field"},
 	}
-	for name, body := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "mdots.toml")
-			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			if err := os.WriteFile(p, []byte(tc.body), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			_, err := Load(p)
 			if err == nil {
 				t.Fatalf("%s: エラー expected, got nil", name)
 			}
-			if !strings.Contains(err.Error(), "old") && !strings.Contains(err.Error(), "entries") {
-				t.Errorf("%s: 明確な失敗文言 expected, got %q", name, err.Error())
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: %q を含む明確な失敗 expected, got %q", name, tc.want, err.Error())
 			}
 		})
 	}
@@ -280,7 +284,7 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	for _, want := range []string{"[entries.", "src =", "targets", "targets.win", `"~/`} {
+	for _, want := range []string{"[entries.", "src =", "targets", "targets.win", `"~/`, "override"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("template should contain %q, got:\n%s", want, body)
 		}
@@ -300,27 +304,6 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatal("second Init: エラー expected, got nil")
 	} else if !strings.Contains(err.Error(), "mdots.toml already exists in ") {
 		t.Errorf("既存ありエラーメッセージ不正: got %q", err.Error())
-	}
-}
-
-// Seam: config パッケージ公開境界 (init 雛形の override 例)
-// 雛形に override の書き方例がコメントで含まれ、生成物が Load を通る外部挙動を検証する。
-func TestInitTemplateContainsOverrideExample(t *testing.T) {
-	dir := t.TempDir()
-	p, err := Init(dir)
-	if err != nil {
-		t.Fatalf("Init error: %v", err)
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("ReadFile error: %v", err)
-	}
-	body := string(data)
-	if !strings.Contains(body, "override") {
-		t.Errorf("template should contain override example, got:\n%s", body)
-	}
-	if _, err := Load(p); err != nil {
-		t.Errorf("generated template must Load: %v", err)
 	}
 }
 
@@ -809,8 +792,8 @@ func TestAppendRoundTripSpecialChars(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (fragment追記)
-// 元ファイル温存・末尾改行なし・targets追記マージ・特殊文字・mode継承・
-// 重複時不変を外部挙動で検証する。
+// 元ファイル温存・末尾改行なし・targets追記マージ・
+// 重複時不変を外部挙動で検証する。特殊文字往復は TestAppendRoundTripSpecialChars に寄せる。
 func TestAppendPreservesAndMerges(t *testing.T) {
 	t.Run("コメント温存して追記", func(t *testing.T) {
 		dir := t.TempDir()
@@ -866,25 +849,6 @@ func TestAppendPreservesAndMerges(t *testing.T) {
 		}
 		if got := back.Resolve("wsl"); len(got) != 1 {
 			t.Errorf("wsl消失: %+v", got)
-		}
-	})
-	t.Run("特殊文字でも往復", func(t *testing.T) {
-		dir := t.TempDir()
-		p := filepath.Join(dir, "mdots.toml")
-		if err := os.WriteFile(p, []byte("[entries]\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		dest := `~/.config/a"b`
-		src, _ := SrcForDest(dest)
-		if err := AppendPlainEntry(p, dest, src); err != nil {
-			t.Fatalf("Append error: %v", err)
-		}
-		back, err := Load(p)
-		if err != nil {
-			t.Fatalf("Load error: %v\n%s", err, readFileForTest(t, p))
-		}
-		if _, ok := back.Entries[dest]; !ok {
-			t.Errorf("特殊文字キー消失: %q", dest)
 		}
 	})
 	t.Run("重複は失敗し不変", func(t *testing.T) {

@@ -106,7 +106,7 @@ func TestCliGlobalHelp(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
-		for _, want := range []string{"USAGE:", "COMMANDS:", "GLOBAL OPTIONS:", "push", "pull", "init"} {
+		for _, want := range []string{"USAGE:", "COMMANDS:", "GLOBAL OPTIONS:", "push", "pull", "init", "add", "targets"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
@@ -676,18 +676,8 @@ func TestCliTargetsExecutorError(t *testing.T) {
 
 // Seam: CLIコマンド境界 (add 登録委譲)
 // 位置引数1件の委譲・成功文面・引数なし/余剰/未知フラグ拒否・実行エラーの
-// 外部挙動のみを検証する。実FSには触れない。
-func TestCliGlobalHelpContainsAdd(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, out, _ := runCli(t, ex, []string{"--help"})
-	if code != 0 {
-		t.Fatalf("Run(--help) exit = %d, want 0", code)
-	}
-	if !strings.Contains(out, "add") {
-		t.Errorf("global help should contain add, got %q", out)
-	}
-}
-
+// 外部挙動のみを検証する。実FSには触れない。global helpのadd/targets掲載は
+// TestCliGlobalHelp に寄せる。
 func TestCliAddDispatches(t *testing.T) {
 	ex := &fakeExecutor{addKey: "~/.vimrc", addSrc: "dotfiles/.vimrc"}
 	code, out, _ := runCli(t, ex, []string{"add", "~/.vimrc"})

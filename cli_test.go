@@ -133,30 +133,33 @@ func TestDryRunIntegration(t *testing.T) {
 	})
 }
 
+// E2Eは配線代表1ケースのみ。push/pull両系統の網羅は fake 層の TestCliColorRequiresDryRun に寄せる。
 func TestColorRequiresDryRun(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		map[string]string{"vimrc": "same\n"},
 		map[string]string{".vimrc": "same\n"},
 		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
 	)
-	for _, args := range [][]string{{"push", "--color=always"}, {"pull", "--color=always"}} {
-		var out, errOut bytes.Buffer
-		if code := runWithWriters(args, store, &out, &errOut); code == 0 {
-			t.Errorf("run(%v): exit = 0, want non-zero", args)
-		}
-		if !strings.Contains(errOut.String(), "--color requires --dry-run") {
-			t.Errorf("run(%v): stderr should contain --color requires --dry-run, got %q", args, errOut.String())
-		}
+	args := []string{"push", "--color=always"}
+	var out, errOut bytes.Buffer
+	if code := runWithWriters(args, store, &out, &errOut); code == 0 {
+		t.Errorf("run(%v): exit = 0, want non-zero", args)
+	}
+	if !strings.Contains(errOut.String(), "--color requires --dry-run") {
+		t.Errorf("run(%v): stderr should contain --color requires --dry-run, got %q", args, errOut.String())
 	}
 }
 
+// Store不在時の exit＋文言を1テストで検証する。全コマンドのexit＋文言をここに集約する。
 func TestStoreNotFoundFriendlyError(t *testing.T) {
 	empty := t.TempDir()
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"push"}, empty, &out, &errOut); code == 0 {
-		t.Fatal("run(push) without Store: exit = 0, want non-zero")
-	}
-	if !strings.Contains(errOut.String(), "mdots.toml not found in "+empty) {
-		t.Errorf("stderr should contain friendly message, got %q", errOut.String())
+	for _, args := range [][]string{{"push"}, {"pull"}, {"push", "--dry-run"}, {"pull", "--dry-run"}, {"targets"}} {
+		var out, errOut bytes.Buffer
+		if code := runWithWriters(args, empty, &out, &errOut); code == 0 {
+			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
+		}
+		if !strings.Contains(errOut.String(), "mdots.toml not found in "+empty) {
+			t.Errorf("run(%v): stderr should contain friendly message, got %q", args, errOut.String())
+		}
 	}
 }
