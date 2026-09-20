@@ -472,26 +472,115 @@ func (c *Config) AddTarget(dest, target, src string) error {
 	return nil
 }
 
-// Save は Config 全体をテーブル形式で保存する。
-// インデントは付けない。値を持たない空のテーブルヘッダ
-// （[entries] を含む中間ヘッダ：直後が次のヘッダまたは末尾）は出さない。
-// TOMLでは [a.b.c] だけで親が暗黙定義されるため、生成物は Load で読みに戻せる
-// （ヘッダあり・なし・インライン・targets・override 混在）。
-func (c Config) Save(path string) error {
-	if err := c.Validate(); err != nil {
+// AppendPlainEntry は素のsrc形式の1 Entry分fragmentを生成し、
+// 元ファイルに追記した完成形を再Loadして問題なければatomicに置換する。
+// 既存バイトは追記以外温存する。失敗時は元ファイルを不変に保つ。
+func AppendPlainEntry(path, dest, src string) error {
+	if dest == "" {
+		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+	}
+	if src == "" {
+		return fmt.Errorf("entries[%q]: src is required", dest)
+	}
+	srcCopy := src
+	return appendSingleEntry(path, dest, EntryValue{Src: &srcCopy})
+}
+
+// AppendTargetEntry はtargets形式の新規1 Target分fragmentを生成し、
+// 元ファイルに追記した完成形を再Loadして問題なければatomicに置換する。
+// 新規dest・既存destへのTarget追記のいずれも末尾追記で統一する。
+// 失敗時は元ファイルを不変に保つ。
+func AppendTargetEntry(path, dest, target, src string) error {
+	if dest == "" {
+		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+	}
+	if target == "" {
+		return fmt.Errorf("entries[%q]: target must not be empty", dest)
+	}
+	if src == "" {
+		return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, target)
+	}
+	srcCopy := src
+	entry := EntryValue{Targets: &map[string]TargetValue{target: {Src: &srcCopy}}}
+	return appendSingleEntry(path, dest, entry)
+}
+
+// appendSingleEntry は1 Entry分のfragment化と追記＋検証＋置換を一本化する。
+func appendSingleEntry(path, dest string, entry EntryValue) error {
+	fragment, err := encodeSingleEntry(dest, entry)
+	if err != nil {
 		return err
+	}
+	return appendFragmentAtomic(path, fragment)
+}
+
+// encodeSingleEntry は1 EntryだけのConfigを Save と同じテーブル形式でfragment化する。
+func encodeSingleEntry(dest string, entry EntryValue) (string, error) {
+	singleConfig := Config{Entries: map[string]EntryValue{dest: entry}}
+	if err := singleConfig.Validate(); err != nil {
+		return "", err
 	}
 	var buf bytes.Buffer
 	enc := toml.NewEncoder(&buf)
 	enc.Indent = ""
-	if err := enc.Encode(c); err != nil {
-		return err
+	if err := enc.Encode(singleConfig); err != nil {
+		return "", err
 	}
 	out := stripEmptyTableHeaders(buf.String())
 	if out != "" && !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
-	return os.WriteFile(path, []byte(out), 0o644)
+	return out, nil
+}
+
+// appendFragmentAtomic は元ファイルrawにfragmentを追記した完成形をtempに書き、
+// 再Loadで検証してからrenameでatomicに置換する。元ファイルのmodeを継承し
+// （取得不可・新規時は0644）、失敗時はtempを削除して元を不変に保つ。
+func appendFragmentAtomic(path, fragment string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	combined := raw
+	if len(combined) > 0 && combined[len(combined)-1] != '\n' {
+		combined = append(combined, '\n')
+	}
+	combined = append(combined, []byte(fragment)...)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".mdots.toml.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(combined); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if _, err := Load(tmpName); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
 }
 
 // stripEmptyTableHeaders は値行を持たないテーブルヘッダ行を取り除く。

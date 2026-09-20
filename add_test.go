@@ -324,6 +324,32 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 }
 
+func TestAddEndToEndPreservesCommentsAndAppends(t *testing.T) {
+	store, _ := setupAddEnv(t,
+		nil,
+		map[string]string{".vimrc": "x\n"},
+		"# my comment\n[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n",
+	)
+	before := readTomlForAddTest(t, store)
+	var out, errOut bytes.Buffer
+	if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code != 0 {
+		t.Fatalf("run(add) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	}
+	body := readTomlForAddTest(t, store)
+	if !strings.Contains(body, "# my comment") {
+		t.Errorf("comment must be preserved, got:\n%s", body)
+	}
+	if !strings.Contains(body, "\"~/.bashrc\"") {
+		t.Errorf("existing entry must be preserved byte-wise, got:\n%s", body)
+	}
+	if !strings.HasPrefix(body, before) {
+		t.Errorf("existing bytes must be prefix-preserved:\nbefore:\n%s\ngot:\n%s", before, body)
+	}
+	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/.vimrc") {
+		t.Errorf("new entry must be appended, got:\n%s", body)
+	}
+}
+
 func TestAddEndToEndWithoutStoreFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
