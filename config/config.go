@@ -408,7 +408,7 @@ func (c *Config) AddTarget(dest, target, src string) error {
 }
 
 // AppendPlainEntry は素のsrc形式の1 Entry分fragmentを生成し、
-// 元ファイルに追記した完成形を再Loadして問題なければatomicに置換する。
+// 元ファイルに空行1行で区切って追記した完成形を再Loadして問題なければatomicに置換する。
 // 既存バイトは追記以外温存する。失敗時は元ファイルを不変に保つ。
 func AppendPlainEntry(path, dest, src string) error {
 	if dest == "" {
@@ -422,7 +422,7 @@ func AppendPlainEntry(path, dest, src string) error {
 }
 
 // AppendTargetEntry はtargets形式の新規1 Target分fragmentを生成し、
-// 元ファイルに追記した完成形を再Loadして問題なければatomicに置換する。
+// 元ファイルに空行1行で区切って追記した完成形を再Loadして問題なければatomicに置換する。
 // 新規dest・既存destへのTarget追記のいずれも末尾追記で統一する。
 // 失敗時は元ファイルを不変に保つ。
 func AppendTargetEntry(path, dest, target, src string) error {
@@ -468,9 +468,10 @@ func encodeSingleEntry(dest string, entry EntryValue) (string, error) {
 	return out, nil
 }
 
-// appendFragmentAtomic は元ファイルrawにfragmentを追記した完成形をtempに書き、
+// appendFragmentAtomic は元ファイルrawにfragmentを空行1行で区切って追記した完成形をtempに書き、
 // 再Loadで検証してからrenameでatomicに置換する。元ファイルのmodeを継承し
 // （取得不可・新規時は0644）、失敗時はtempを削除して元を不変に保つ。
+// 空ファイル時はfragmentのみ、既に空行で終わる時は追加しない。末尾改行なしは補う。
 func appendFragmentAtomic(path, fragment string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -481,8 +482,13 @@ func appendFragmentAtomic(path, fragment string) error {
 		mode = fi.Mode().Perm()
 	}
 	combined := raw
-	if len(combined) > 0 && combined[len(combined)-1] != '\n' {
-		combined = append(combined, '\n')
+	if len(combined) > 0 {
+		if combined[len(combined)-1] != '\n' {
+			combined = append(combined, '\n')
+		}
+		if len(combined) < 2 || combined[len(combined)-2] != '\n' {
+			combined = append(combined, '\n')
+		}
 	}
 	combined = append(combined, []byte(fragment)...)
 	dir := filepath.Dir(path)
