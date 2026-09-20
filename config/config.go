@@ -111,17 +111,18 @@ func resolveOverride(top, inner *bool) bool {
 }
 
 // Load は Store の mdots.toml を読み込み、validation して返す。
-// 旧 [[entries]] 配列形式・旧 target 記法は明確に失敗させる。
+// 未知フィールドは一律 unknown field で拒否し、型不正は Decode エラーに任せる。
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
-	if err := rejectOldFormat(data); err != nil {
+	var cfg Config
+	md, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return Config{}, err
 	}
-	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := rejectUnexpectedFormat(md, cfg); err != nil {
 		return Config{}, err
 	}
 	if cfg.Entries == nil {
@@ -133,93 +134,28 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// rejectOldFormat は旧形式を汎用マップで先読みし、明確な失敗文言で拒否する。
-// 旧 [[entries]] 配列・旧 target 記法・旧 targets 配列を拒否し、
-// 配置先直下と targets マップ値の未知フィールドもここで厳密に拒否する。
-// override は bool のみ受け付け、不正値は明確に失敗させる。
-func rejectOldFormat(data []byte) error {
-	var raw map[string]interface{}
-	if err := toml.Unmarshal(data, &raw); err != nil {
-		return err
+// rejectUnexpectedFormat は想定外フォーマットを一律拒否する。
+// 未知フィールドは unknown field で拒否する。
+// BurntSushi/toml は map への非テーブル代入を黙って空にするため、
+// entries と targets のテーブル型はここで明示的に拒否する。
+// ドットヘッダで暗黙生成された親テーブルは Type が "" になるため許容する。
+func rejectUnexpectedFormat(md toml.MetaData, cfg Config) error {
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		return fmt.Errorf("unknown field %q", undecoded[0].String())
 	}
-	v, ok := raw["entries"]
-	if !ok || v == nil {
-		return nil
+	if md.IsDefined("entries") {
+		if typ := md.Type("entries"); typ != "Hash" && typ != "" {
+			return fmt.Errorf("entries: table expected")
+		}
 	}
-	switch entries := v.(type) {
-	case map[string]interface{}:
-		for _, dest := range sortedKeys(entries) {
-			item := entries[dest]
-			m, ok := item.(map[string]interface{})
-			if !ok {
-				return fmt.Errorf("entries[%q]: table expected", dest)
-			}
-			if _, ok := m["target"]; ok {
-				return fmt.Errorf("entries[%q]: old target format is no longer supported (use targets = { win = { src = \"...\" } })", dest)
-			}
-			for field := range m {
-				if field != "src" && field != "targets" && field != "override" {
-					return fmt.Errorf("entries[%q]: unknown field %q", dest, field)
-				}
-			}
-			if ov, ok := m["override"]; ok && ov != nil {
-				if _, ok := ov.(bool); !ok {
-					return fmt.Errorf("entries[%q]: override must be a boolean", dest)
-				}
-			}
-			tv, ok := m["targets"]
-			if !ok || tv == nil {
-				continue
-			}
-			switch targets := tv.(type) {
-			case map[string]interface{}:
-				for _, tname := range sortedKeys(targets) {
-					titem := targets[tname]
-					tm, ok := titem.(map[string]interface{})
-					if !ok {
-						return fmt.Errorf("entries[%q].targets[%q]: table expected", dest, tname)
-					}
-					for field := range tm {
-						if field != "src" && field != "override" {
-							return fmt.Errorf("entries[%q].targets[%q]: unknown field %q", dest, tname, field)
-						}
-					}
-					if ov, ok := tm["override"]; ok && ov != nil {
-						if _, ok := ov.(bool); !ok {
-							return fmt.Errorf("entries[%q].targets[%q]: override must be a boolean", dest, tname)
-						}
-					}
-				}
-			case []interface{}:
-				return oldTargetsArrayError(dest)
-			case []map[string]interface{}:
-				return oldTargetsArrayError(dest)
-			default:
-				msg := fmt.Sprintf("%T", tv)
-				if strings.HasPrefix(msg, "[]") {
-					return oldTargetsArrayError(dest)
-				}
+	for dest := range cfg.Entries {
+		if md.IsDefined("entries", dest, "targets") {
+			if typ := md.Type("entries", dest, "targets"); typ != "Hash" && typ != "" {
 				return fmt.Errorf("entries[%q]: targets must be a table", dest)
 			}
 		}
-		return nil
-	case []interface{}:
-		return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
-	case []map[string]interface{}:
-		return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
-	default:
-		// 配列デコードの別表現や想定外の型も旧形式または型不正として扱う。
-		msg := fmt.Sprintf("%T", v)
-		if strings.HasPrefix(msg, "[]") {
-			return fmt.Errorf("entries: old [[entries]] format is no longer supported (use [entries] with dest keys)")
-		}
-		return fmt.Errorf("entries: table expected")
 	}
-}
-
-// oldTargetsArrayError は旧 targets 配列形式に対する明確な失敗文言を返す。
-func oldTargetsArrayError(dest string) error {
-	return fmt.Errorf("entries[%q]: old targets array format is no longer supported (use targets = { win = { src = \"...\" } })", dest)
+	return nil
 }
 
 // Validate は配置先キー・{src}/{targets} 排他・空を検証する。
