@@ -34,7 +34,8 @@ type runner struct {
 // Run は CLI表面の入口である。args は os.Args[1:] 相当、cwd は実行ディレクトリ。
 // 戻り値はプロセスの exit code。
 // フラグ解釈・help/version/unknown の表面は枠組み既定に任せ、
-// 空値・余剰引数の拒否だけを Action 側で残す。
+// 空値拒否は Flag.Validator、余剰引数拒否は Before に寄せる。
+// 位置引数の不足・--color依存など本質検査だけを Action 側に残す。
 func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
 	r := &runner{version: version, cwd: cwd, stdout: stdout, stderr: stderr}
 
@@ -60,14 +61,39 @@ func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
 }
 
 // targetFlag は --target/-t の宣言である。--target <name> と --target=<name> の
-// 両形式はフレームワークが解釈する。
+// 両形式はフレームワークが解釈する。空値 (--target=) は Validator で拒否し、
+// 枠組み既定の Incorrect Usage＋help になる。
 func targetFlag() cliv3.Flag {
-	return &cliv3.StringFlag{Name: "target", Aliases: []string{"t"}, Usage: "対象Target (例: win, wsl)。--target=<name> 形式も可"}
+	return &cliv3.StringFlag{
+		Name:    "target",
+		Aliases: []string{"t"},
+		Usage:   "対象Target (例: win, wsl)。--target=<name> 形式も可",
+		Validator: func(v string) error {
+			if v == "" {
+				return fmt.Errorf("missing value for --target")
+			}
+			return nil
+		},
+	}
 }
 
 // colorFlag は --color/-c の宣言である。push/pull の dry-run 時の着色制御で auto|always|never を取る。
+// 値域検査は Validator に移譲し、枠組み既定の Incorrect Usage＋help になる。
 func colorFlag() cliv3.Flag {
-	return &cliv3.StringFlag{Name: "color", Aliases: []string{"c"}, Value: "auto", Usage: "差分の着色 (auto|always|never)"}
+	return &cliv3.StringFlag{
+		Name:    "color",
+		Aliases: []string{"c"},
+		Value:   "auto",
+		Usage:   "差分の着色 (auto|always|never)",
+		Validator: func(v string) error {
+			switch v {
+			case "auto", "always", "never":
+				return nil
+			default:
+				return fmt.Errorf("invalid value for --color: %s (want auto|always|never)", v)
+			}
+		},
+	}
 }
 
 // dryRunFlag は --dry-run/-n の宣言である。push/pull で書き込まず差分を出力する。
@@ -75,22 +101,11 @@ func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Aliases: []string{"n"}, Usage: "書き込まず差分を出力する"}
 }
 
-// parseColor は --color 値を検証する。不正時は文面を出して exit 用エラーを返す。
-func (r *runner) parseColor(cmd *cliv3.Command) (string, error) {
-	color := cmd.String("color")
-	switch color {
-	case "auto", "always", "never":
-		return color, nil
-	default:
-		fmt.Fprintf(r.stderr, "invalid value for --color: %s (want auto|always|never)\n", color)
-		return "", &exitError{code: 1}
-	}
-}
-
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
 // 枠組み既定に任せ、--target の定義だけを宣言する。
-// フラグ解釈失敗時（未知フラグ・値なし）は OnUsageError 既定（nil）の
+// フラグ解釈失敗時（未知フラグ・値なし・Validator拒否）は OnUsageError 既定（nil）の
 // Incorrect Usage＋help表示になる。
+// 余分な位置引数の拒否は各サブコマンドの Before（rejectExtraArgs）に1箇所化する。
 func (r *runner) newCommand() *cliv3.Command {
 	return &cliv3.Command{
 		Name:    "mdots",
@@ -113,6 +128,7 @@ func (r *runner) newCommand() *cliv3.Command {
 					dryRunFlag(),
 					colorFlag(),
 				},
+				Before: r.rejectExtraArgs(0),
 				Action: r.pushAction,
 			},
 			{
@@ -123,16 +139,19 @@ func (r *runner) newCommand() *cliv3.Command {
 					dryRunFlag(),
 					colorFlag(),
 				},
+				Before: r.rejectExtraArgs(0),
 				Action: r.pullAction,
 			},
 			{
 				Name:   "init",
 				Usage:  "Storeにmdots.toml雛形を作る",
+				Before: r.rejectExtraArgs(0),
 				Action: r.initAction,
 			},
 			{
 				Name:   "targets",
 				Usage:  "定義済みTarget名の一覧を表示する",
+				Before: r.rejectExtraArgs(0),
 				Action: r.targetsAction,
 			},
 			{
@@ -141,49 +160,37 @@ func (r *runner) newCommand() *cliv3.Command {
 				Flags: []cliv3.Flag{
 					targetFlag(),
 				},
+				// add は位置引数1件まで許容する。0件の不足は Action 側の
+				// 本質検査（missing argument）に残し、2件目以降だけ拒否する。
+				Before: r.rejectExtraArgs(1),
 				Action: r.addAction,
 			},
 		},
 	}
 }
 
-// argError は余分な位置引数を拒否する。
-// なお --help と不正トークンの併用時は help が不正より前にある場合に限り
-// help 優先となり（逆順は利用エラー）、bare `--` 以降は位置引数として
-// ここで拒否される。いずれも exit 1 である。
-func (r *runner) argError(arg string) error {
-	fmt.Fprintf(r.stderr, "unknown argument: %s\n", arg)
-	return &exitError{code: 1}
-}
-
-func (r *runner) targetOf(cmd *cliv3.Command) (string, error) {
-	target := cmd.String("target")
-	if cmd.IsSet("target") && target == "" {
-		// --target= のように空値で指定された場合。
-		fmt.Fprintln(r.stderr, "missing value for --target")
-		return "", &exitError{code: 1}
+// rejectExtraArgs は余分な位置引数を枠組み形式（Incorrect Usage＋help）で拒否する
+// Before である。max 件まで許容し、max+1 件目を名指しする。
+// 枠組みの Before は Incorrect Usage を自動表示しないため、ここで表示して
+// exit 用エラーで中断する。--help は Before より前段で処理されるため優先される。
+// なお bare `--` 以降は位置引数としてここで拒否される。いずれも exit 1 である。
+func (r *runner) rejectExtraArgs(max int) cliv3.BeforeFunc {
+	return func(_ context.Context, cmd *cliv3.Command) (context.Context, error) {
+		args := cmd.Args()
+		if args.Len() > max {
+			extra := args.Get(max)
+			fmt.Fprintf(r.stderr, "Incorrect Usage: unknown argument: %s\n\n", extra)
+			_ = cliv3.ShowSubcommandHelp(cmd)
+			return nil, &exitError{code: 1}
+		}
+		return nil, nil
 	}
-	return target, nil
-}
-
-// targetArgs は余分な位置引数の検査と --target の解釈をまとめて行う。
-func (r *runner) targetArgs(cmd *cliv3.Command) (string, error) {
-	if cmd.Args().Present() {
-		return "", r.argError(cmd.Args().First())
-	}
-	return r.targetOf(cmd)
 }
 
 func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
-	target, err := r.targetArgs(cmd)
-	if err != nil {
-		return err
-	}
+	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
-		color, err := r.parseColor(cmd)
-		if err != nil {
-			return err
-		}
+		color := cmd.String("color")
 		if code := app.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
@@ -201,15 +208,9 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 }
 
 func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
-	target, err := r.targetArgs(cmd)
-	if err != nil {
-		return err
-	}
+	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
-		color, err := r.parseColor(cmd)
-		if err != nil {
-			return err
-		}
+		color := cmd.String("color")
 		if code := app.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
@@ -226,10 +227,7 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 	return nil
 }
 
-func (r *runner) initAction(_ context.Context, cmd *cliv3.Command) error {
-	if cmd.Args().Present() {
-		return r.argError(cmd.Args().First())
-	}
+func (r *runner) initAction(_ context.Context, _ *cliv3.Command) error {
 	if err := app.Init(r.cwd); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
@@ -238,10 +236,7 @@ func (r *runner) initAction(_ context.Context, cmd *cliv3.Command) error {
 	return nil
 }
 
-func (r *runner) targetsAction(_ context.Context, cmd *cliv3.Command) error {
-	if cmd.Args().Present() {
-		return r.argError(cmd.Args().First())
-	}
+func (r *runner) targetsAction(_ context.Context, _ *cliv3.Command) error {
 	names, err := app.Targets(r.cwd)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
@@ -260,13 +255,7 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 		return &exitError{code: 1}
 	}
 	dest := args.First()
-	if args.Len() > 1 {
-		return r.argError(args.Get(1))
-	}
-	target, err := r.targetOf(cmd)
-	if err != nil {
-		return err
-	}
+	target := cmd.String("target")
 	key, src, err := app.Add(r.cwd, dest, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
