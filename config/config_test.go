@@ -280,10 +280,13 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	for _, want := range []string{"[entries]", "src =", "targets", "targets.win", `"~/`} {
+	for _, want := range []string{"[entries.", "src =", "targets", "targets.win", `"~/`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("template should contain %q, got:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "[entries]\n") {
+		t.Errorf("template must not contain bare [entries] line, got:\n%s", body)
 	}
 	for _, old := range []string{"[[entries]]", "dest =", "common", "target = [", "target = \"", "{ target = ", "= {"} {
 		if strings.Contains(body, old) {

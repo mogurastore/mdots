@@ -295,8 +295,7 @@ func (e Entry) ExpandedDest() (string, error) {
 // サンプルはすべてコメントアウト済み。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
 // 記法は add の Save と同じテーブル形式に寄せる（インライン形式は使わない）。
-const Template = `[entries]
-# [entries."~/.vimrc"]
+const Template = `# [entries."~/.vimrc"]
 # src = "dotfiles/.vimrc"
 #
 # [entries."~/.bashrc"]
