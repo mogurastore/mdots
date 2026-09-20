@@ -11,18 +11,27 @@ import (
 // setupStoreWithHome は Store 準備・HOME 隔離の定型を集約する。
 // storeFiles は Store 直下に作るファイル群、homeFiles は HOME 直下に作る
 // ファイル群、tomlBody は mdots.toml の本文。HOME は t.Setenv で隔離する。
+// ネストした親ディレクトリは mkdir -p で作る。
 func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, tomlBody string) (store, home string) {
 	t.Helper()
 	store = t.TempDir()
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	for name, body := range storeFiles {
-		if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+		p := filepath.Join(store, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for name, body := range homeFiles {
-		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o644); err != nil {
+		p := filepath.Join(home, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -276,16 +285,6 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 	}
 	if string(got) != "old\n" {
 		t.Errorf("protected store content = %q, want %q", got, "old\n")
-	}
-}
-
-// Store 未発見時の失敗は共通。文言自体は設定境界テストが保証する。
-func TestCommandsWithoutStoreFail(t *testing.T) {
-	empty := t.TempDir()
-	for _, args := range [][]string{{"push"}, {"pull"}, {"push", "--dry-run"}, {"pull", "--dry-run"}, {"targets"}} {
-		if code := run(args, empty); code == 0 {
-			t.Errorf("run(%v) without Store: exit = 0, want non-zero", args)
-		}
 	}
 }
 

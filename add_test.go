@@ -13,37 +13,7 @@ import (
 // 登録のみ行いコピーしないこと、後続pullで回収できること、エラー時は
 // mdots.tomlが不変であることを確認する。正規化・src算出・保存記法の網羅は
 // 設定境界テスト、委譲・文面・exitはCLI境界テストに寄せる。
-
-// setupAddEnv は add E2E用の Store/HOME を準備する。homeFiles/storeFilesの
-// ネストした親ディレクトリは mkdir -p で作る。HOME は t.Setenv で隔離する。
-func setupAddEnv(t *testing.T, storeFiles, homeFiles map[string]string, tomlBody string) (store, home string) {
-	t.Helper()
-	store = t.TempDir()
-	home = t.TempDir()
-	t.Setenv("HOME", home)
-	for name, body := range storeFiles {
-		p := filepath.Join(store, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, body := range homeFiles {
-		p := filepath.Join(home, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(store, "mdots.toml"), []byte(tomlBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return store, home
-}
+// Store 準備・HOME 隔離は main_test.go の setupStoreWithHome に集約している。
 
 func readTomlForAddTest(t *testing.T, store string) string {
 	t.Helper()
@@ -55,7 +25,7 @@ func readTomlForAddTest(t *testing.T, store string) string {
 }
 
 func TestAddEndToEndRegistersWithoutCopying(t *testing.T) {
-	store, _ := setupAddEnv(t,
+	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
@@ -84,7 +54,7 @@ func TestAddEndToEndRegistersWithoutCopying(t *testing.T) {
 // Seam: CLIコマンド境界 (mdots add --target の実行系・E2E)
 // targets形式での登録・文面・pull回収を外部挙動で検証する。
 func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
-	store, _ := setupAddEnv(t,
+	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
@@ -122,7 +92,7 @@ func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
 // Seam: CLIコマンド境界 (mdots add --target の追記マージ・E2E)
 // targets形式で別Targetを追記し、pullで回収できる外部挙動を検証する。
 func TestAddEndToEndWithTargetMergesNewTarget(t *testing.T) {
-	store, _ := setupAddEnv(t,
+	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
@@ -151,7 +121,7 @@ func TestAddEndToEndWithTargetMergesNewTarget(t *testing.T) {
 }
 
 func TestAddEndToEndPullCollectsAfterAdd(t *testing.T) {
-	store, _ := setupAddEnv(t,
+	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
@@ -174,7 +144,7 @@ func TestAddEndToEndPullCollectsAfterAdd(t *testing.T) {
 }
 
 func TestAddEndToEndAcceptsAbsolutePathUnderHome(t *testing.T) {
-	store, home := setupAddEnv(t,
+	store, home := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
 		"[entries]\n",
@@ -195,7 +165,7 @@ func TestAddEndToEndAcceptsAbsolutePathUnderHome(t *testing.T) {
 
 func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	t.Run("登録済みdestは失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t,
+		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
 			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
@@ -214,7 +184,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("素のsrc済みへのtarget追加は失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t,
+		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
 			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
@@ -233,7 +203,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("同一targetの再登録は失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t,
+		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
 			"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
@@ -249,7 +219,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("Store側src既存は失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t,
+		store, _ := setupStoreWithHome(t,
 			map[string]string{"dotfiles/.vimrc": "existing\n"},
 			map[string]string{".vimrc": "x\n"},
 			"[entries]\n",
@@ -268,7 +238,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("dest不在は失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t, nil, nil, "[entries]\n")
+		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
 		before := readTomlForAddTest(t, store)
 		var out, errOut bytes.Buffer
 		if code := runWithWriters([]string{"add", "~/.missing"}, store, &out, &errOut); code == 0 {
@@ -283,7 +253,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("ディレクトリは失敗し不変", func(t *testing.T) {
-		store, home := setupAddEnv(t, nil, nil, "[entries]\n")
+		store, home := setupStoreWithHome(t, nil, nil, "[entries]\n")
 		if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +271,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("HOME外は失敗し不変", func(t *testing.T) {
-		store, _ := setupAddEnv(t,
+		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
 			"[entries]\n",
@@ -325,7 +295,7 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 }
 
 func TestAddEndToEndPreservesCommentsAndAppends(t *testing.T) {
-	store, _ := setupAddEnv(t,
+	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
 		"# my comment\n[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n",
