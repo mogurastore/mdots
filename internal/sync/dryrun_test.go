@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mogurastore/mdots/config"
+	"github.com/mogurastore/mdots/internal/config"
 )
 
 // Seam: sync パッケージ公開境界 (push/pull dry-run)

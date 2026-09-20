@@ -1,19 +1,19 @@
-package main
+package app
 
 import (
-	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// Seam: CLIコマンド境界 (mdots add の実行系・E2E)
-// 実FS上の Store/HOME を用い、runWithWriters 経由の外部挙動のみを検証する。
+// Seam: 実行系境界 (add 登録・pull 回収)
+// 実FS上の Store/HOME を用い、Add/Pull の外部挙動のみを検証する。
 // 登録のみ行いコピーしないこと、後続pullで回収できること、エラー時は
 // mdots.tomlが不変であることを確認する。正規化・src算出・保存記法の網羅は
-// 設定境界テスト、委譲・文面・exitはCLI境界テストに寄せる。
-// Store 準備・HOME 隔離は main_test.go の setupStoreWithHome に集約している。
+// internal/config、委譲・文面・exitは internal/cli に寄せる。
+// Store 準備・HOME 隔離は app_test.go の setupStoreWithHome に集約している。
 
 func readTomlForAddTest(t *testing.T, store string) string {
 	t.Helper()
@@ -24,19 +24,19 @@ func readTomlForAddTest(t *testing.T, store string) string {
 	return string(data)
 }
 
-func TestAddEndToEndRegistersWithoutCopying(t *testing.T) {
+func TestAddRegistersWithoutCopying(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
 	)
 
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add ~/.vimrc) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	key, src, err := Add(store, "~/.vimrc", "")
+	if err != nil {
+		t.Fatalf("Add(~/.vimrc) error = %v, want nil", err)
 	}
-	if !strings.Contains(out.String(), "~/.vimrc") || !strings.Contains(out.String(), "dotfiles/.vimrc") {
-		t.Errorf("stdout should contain key and src, got %q", out.String())
+	if key != "~/.vimrc" || src != "dotfiles/.vimrc" {
+		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/.vimrc")
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/.vimrc") {
@@ -51,21 +51,21 @@ func TestAddEndToEndRegistersWithoutCopying(t *testing.T) {
 	}
 }
 
-// Seam: CLIコマンド境界 (mdots add --target の実行系・E2E)
-// targets形式での登録・文面・pull回収を外部挙動で検証する。
-func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
+// Seam: 実行系境界 (add --target の登録)
+// targets形式での登録・pull回収を外部挙動で検証する。
+func TestAddWithTargetRegistersTargetsForm(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
 	)
 
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add --target win ~/.vimrc) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	key, src, err := Add(store, "~/.vimrc", "win")
+	if err != nil {
+		t.Fatalf("Add(~/.vimrc, win) error = %v, want nil", err)
 	}
-	if !strings.Contains(out.String(), "~/.vimrc") || !strings.Contains(out.String(), "win") || !strings.Contains(out.String(), "dotfiles/win/.vimrc") {
-		t.Errorf("stdout should contain key, target and src, got %q", out.String())
+	if key != "~/.vimrc" || src != "dotfiles/win/.vimrc" {
+		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/win/.vimrc")
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "win") || !strings.Contains(body, "dotfiles/win/.vimrc") {
@@ -77,8 +77,8 @@ func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(store, "dotfiles", "win", ".vimrc")); err == nil {
 		t.Error("Store src must NOT be created by add --target (pull collects it)")
 	}
-	if code := run([]string{"pull", "--target", "win"}, store); code != 0 {
-		t.Fatalf("run(pull --target win) after add exit = %d, want 0", code)
+	if err := Pull(store, "win", io.Discard); err != nil {
+		t.Fatalf("Pull(win) after add error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "win", ".vimrc"))
 	if err != nil {
@@ -89,27 +89,27 @@ func TestAddEndToEndWithTargetRegistersTargetsForm(t *testing.T) {
 	}
 }
 
-// Seam: CLIコマンド境界 (mdots add --target の追記マージ・E2E)
+// Seam: 実行系境界 (add --target の追記マージ)
 // targets形式で別Targetを追記し、pullで回収できる外部挙動を検証する。
-func TestAddEndToEndWithTargetMergesNewTarget(t *testing.T) {
+func TestAddWithTargetMergesNewTarget(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
 	)
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "--target", "wsl", "~/.vimrc"}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add --target wsl) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	key, src, err := Add(store, "~/.vimrc", "wsl")
+	if err != nil {
+		t.Fatalf("Add(~/.vimrc, wsl) error = %v, want nil", err)
 	}
-	if !strings.Contains(out.String(), "wsl") || !strings.Contains(out.String(), "dotfiles/wsl/.vimrc") {
-		t.Errorf("stdout should contain target and src, got %q", out.String())
+	if key != "~/.vimrc" || src != "dotfiles/wsl/.vimrc" {
+		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/wsl/.vimrc")
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "win") || !strings.Contains(body, "wsl") {
 		t.Errorf("mdots.toml should contain both targets, got:\n%s", body)
 	}
-	if code := run([]string{"pull", "--target", "wsl"}, store); code != 0 {
-		t.Fatalf("run(pull --target wsl) after merge exit = %d, want 0", code)
+	if err := Pull(store, "wsl", io.Discard); err != nil {
+		t.Fatalf("Pull(wsl) after merge error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "wsl", ".vimrc"))
 	if err != nil {
@@ -120,19 +120,18 @@ func TestAddEndToEndWithTargetMergesNewTarget(t *testing.T) {
 	}
 }
 
-func TestAddEndToEndPullCollectsAfterAdd(t *testing.T) {
+func TestAddPullCollectsAfterAdd(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
 		"[entries]\n",
 	)
 
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	if _, _, err := Add(store, "~/.vimrc", ""); err != nil {
+		t.Fatalf("Add error = %v, want nil", err)
 	}
-	if code := run([]string{"pull"}, store); code != 0 {
-		t.Fatalf("run(pull) after add exit = %d, want 0", code)
+	if err := Pull(store, "", io.Discard); err != nil {
+		t.Fatalf("Pull after add error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", ".vimrc"))
 	if err != nil {
@@ -143,7 +142,7 @@ func TestAddEndToEndPullCollectsAfterAdd(t *testing.T) {
 	}
 }
 
-func TestAddEndToEndAcceptsAbsolutePathUnderHome(t *testing.T) {
+func TestAddAcceptsAbsolutePathUnderHome(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
@@ -151,19 +150,19 @@ func TestAddEndToEndAcceptsAbsolutePathUnderHome(t *testing.T) {
 	)
 
 	abs := filepath.Join(home, ".vimrc")
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", abs}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add %s) exit = %d, want 0 (stderr=%q)", abs, code, errOut.String())
+	key, _, err := Add(store, abs, "")
+	if err != nil {
+		t.Fatalf("Add(%s) error = %v, want nil", abs, err)
 	}
-	if !strings.Contains(out.String(), "~/.vimrc") {
-		t.Errorf("stdout should contain normalized key ~/.vimrc, got %q", out.String())
+	if key != "~/.vimrc" {
+		t.Errorf("key = %q, want normalized %q", key, "~/.vimrc")
 	}
 	if body := readTomlForAddTest(t, store); !strings.Contains(body, "~/.vimrc") {
 		t.Errorf("mdots.toml should contain normalized key, got:\n%s", body)
 	}
 }
 
-func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
+func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 	t.Run("登録済みdestは失敗し不変", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
@@ -171,12 +170,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
 		)
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add registered): exit = 0, want non-zero")
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on duplicate")
+		if _, _, err := Add(store, "~/.vimrc", ""); err == nil {
+			t.Fatal("Add(registered): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -190,12 +185,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
 		)
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add --target registered): exit = 0, want non-zero")
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on duplicate with target")
+		if _, _, err := Add(store, "~/.vimrc", "win"); err == nil {
+			t.Fatal("Add(registered, win): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -209,9 +200,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 			"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
 		)
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "--target", "win", "~/.vimrc"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add --target duplicate): exit = 0, want non-zero")
+		if _, _, err := Add(store, "~/.vimrc", "win"); err == nil {
+			t.Fatal("Add(duplicate target): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -225,12 +215,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 			"[entries]\n",
 		)
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add existing src): exit = 0, want non-zero")
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on existing src")
+		if _, _, err := Add(store, "~/.vimrc", ""); err == nil {
+			t.Fatal("Add(existing src): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -240,12 +226,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	t.Run("dest不在は失敗し不変", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "~/.missing"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add missing): exit = 0, want non-zero")
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on missing dest")
+		if _, _, err := Add(store, "~/.missing", ""); err == nil {
+			t.Fatal("Add(missing): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -258,12 +240,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := readTomlForAddTest(t, store)
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", "~/.config"}, store, &out, &errOut); code == 0 {
-			t.Fatal("run(add dir): exit = 0, want non-zero")
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on directory")
+		if _, _, err := Add(store, "~/.config", ""); err == nil {
+			t.Fatal("Add(dir): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -281,12 +259,8 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 		if err := os.WriteFile(outside, []byte("x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		var out, errOut bytes.Buffer
-		if code := runWithWriters([]string{"add", outside}, store, &out, &errOut); code == 0 {
-			t.Fatalf("run(add %s): exit = 0, want non-zero", outside)
-		}
-		if errOut.String() == "" {
-			t.Error("stderr should not be empty on outside-HOME")
+		if _, _, err := Add(store, outside, ""); err == nil {
+			t.Fatalf("Add(%s): error = nil, want non-nil", outside)
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -294,16 +268,15 @@ func TestAddEndToEndErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 }
 
-func TestAddEndToEndPreservesCommentsAndAppends(t *testing.T) {
+func TestAddPreservesCommentsAndAppends(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
 		"# my comment\n[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n",
 	)
 	before := readTomlForAddTest(t, store)
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "~/.vimrc"}, store, &out, &errOut); code != 0 {
-		t.Fatalf("run(add) exit = %d, want 0 (stderr=%q)", code, errOut.String())
+	if _, _, err := Add(store, "~/.vimrc", ""); err != nil {
+		t.Fatalf("Add error = %v, want nil", err)
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "# my comment") {
@@ -320,19 +293,13 @@ func TestAddEndToEndPreservesCommentsAndAppends(t *testing.T) {
 	}
 }
 
-func TestAddEndToEndWithoutStoreFails(t *testing.T) {
+func TestAddWithoutStoreFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	target := filepath.Join(home, ".vimrc")
-	if err := os.WriteFile(target, []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	empty := t.TempDir()
-	var out, errOut bytes.Buffer
-	if code := runWithWriters([]string{"add", "~/.vimrc"}, empty, &out, &errOut); code == 0 {
-		t.Fatal("run(add) without Store: exit = 0, want non-zero")
-	}
-	if !strings.Contains(errOut.String(), "mdots.toml not found in "+empty) {
-		t.Errorf("stderr should contain not-found error, got %q", errOut.String())
+	if _, _, err := Add(empty, "~/.vimrc", ""); err == nil {
+		t.Fatal("Add without Store: error = nil, want non-nil")
+	} else if !strings.Contains(err.Error(), "mdots.toml not found in "+empty) {
+		t.Errorf("error should contain not-found error, got %q", err.Error())
 	}
 }

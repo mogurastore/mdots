@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mogurastore/mdots/app"
+	"github.com/mogurastore/mdots/internal/app"
 	cliv3 "github.com/urfave/cli/v3"
 )
 

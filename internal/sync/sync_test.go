@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mogurastore/mdots/config"
+	"github.com/mogurastore/mdots/internal/config"
 )
 
 // setupSyncDirs は Store/dest の実FS準備の定型を集約する。
