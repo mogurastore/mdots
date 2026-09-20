@@ -2,107 +2,61 @@ package cli
 
 import (
 	"bytes"
-	"errors"
-	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// Seam: CLIコマンド境界 (新CLIパッケージ: コマンド定義・Writer注入・exit)
-// 実行系はfake Executorに差し替え、外部挙動（exit codeと出力文面）のみを検証する。
+// Seam: CLIコマンド境界 (コマンド定義・Writer注入・exit)
+// 実行系は実appに直結し、t.TempDir上の実Store/HOMEで外部挙動
+// （exit code・出力文面・FS副作用）のみを検証する。
+// Writer/ErrWriter注入は維持し、同一プロセスで完結する。
 
-type fakeExecutor struct {
-	pushTarget string
-	pushCalls  int
-	pushErr    error
-
-	pullTarget string
-	pullCalls  int
-	pullErr    error
-
-	pushDryRunCode   int
-	pushDryRunOut    string
-	pushDryRunCalls  int
-	pushDryRunTarget string
-	pushDryRunColor  string
-
-	pullDryRunCode   int
-	pullDryRunOut    string
-	pullDryRunCalls  int
-	pullDryRunTarget string
-	pullDryRunColor  string
-
-	initCalls int
-	initErr   error
-
-	targetsCalls int
-	targetsOut   []string
-	targetsErr   error
-
-	addCalls  int
-	addDest   string
-	addTarget string
-	addKey    string
-	addSrc    string
-	addErr    error
+func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, tomlBody string) (store, home string) {
+	t.Helper()
+	store = t.TempDir()
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	for name, body := range storeFiles {
+		p := filepath.Join(store, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range homeFiles {
+		p := filepath.Join(home, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(store, "mdots.toml"), []byte(tomlBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return store, home
 }
 
-func (f *fakeExecutor) Push(cwd, target string) error {
-	f.pushCalls++
-	f.pushTarget = target
-	return f.pushErr
-}
-
-func (f *fakeExecutor) Pull(cwd, target string) error {
-	f.pullCalls++
-	f.pullTarget = target
-	return f.pullErr
-}
-
-func (f *fakeExecutor) PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
-	f.pushDryRunCalls++
-	f.pushDryRunTarget = target
-	f.pushDryRunColor = color
-	io.WriteString(stdout, f.pushDryRunOut)
-	return f.pushDryRunCode
-}
-
-func (f *fakeExecutor) PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int {
-	f.pullDryRunCalls++
-	f.pullDryRunTarget = target
-	f.pullDryRunColor = color
-	io.WriteString(stdout, f.pullDryRunOut)
-	return f.pullDryRunCode
-}
-
-func (f *fakeExecutor) Init(cwd string) error {
-	f.initCalls++
-	return f.initErr
-}
-
-func (f *fakeExecutor) Targets(cwd string) ([]string, error) {
-	f.targetsCalls++
-	return f.targetsOut, f.targetsErr
-}
-
-func (f *fakeExecutor) Add(cwd, dest, target string) (string, string, error) {
-	f.addCalls++
-	f.addDest = dest
-	f.addTarget = target
-	return f.addKey, f.addSrc, f.addErr
-}
-
-func runCli(t *testing.T, ex Executor, args []string) (int, string, string) {
+func runCli(t *testing.T, cwd string, args []string) (int, string, string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := Run(args, t.TempDir(), "v0.0.0-test", ex, &out, &errOut)
+	code := Run(args, cwd, "v0.0.0-test", &out, &errOut)
 	return code, out.String(), errOut.String()
+}
+
+func runCliEmpty(t *testing.T, args []string) (int, string, string) {
+	t.Helper()
+	return runCli(t, t.TempDir(), args)
 }
 
 func TestCliGlobalHelp(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"-h"}} {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, args)
+		code, out, _ := runCliEmpty(t, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
@@ -118,8 +72,7 @@ func TestCliGlobalHelp(t *testing.T) {
 }
 
 func TestCliNoArgsShowsStandardHelp(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, out, errOut := runCli(t, ex, nil)
+	code, out, errOut := runCliEmpty(t, nil)
 	if code != 0 {
 		t.Fatalf("Run(nil) exit = %d, want 0", code)
 	}
@@ -133,8 +86,7 @@ func TestCliNoArgsShowsStandardHelp(t *testing.T) {
 
 func TestCliVersion(t *testing.T) {
 	for _, args := range [][]string{{"--version"}, {"-v"}} {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, args)
+		code, out, _ := runCliEmpty(t, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
@@ -146,8 +98,7 @@ func TestCliVersion(t *testing.T) {
 
 func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 	t.Run("-Vは標準の未知フラグ扱い", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, out, errOut := runCli(t, ex, []string{"-V"})
+		code, out, errOut := runCliEmpty(t, []string{"-V"})
 		if code == 0 {
 			t.Fatal("Run(-V): exit = 0, want non-zero")
 		}
@@ -160,8 +111,7 @@ func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 	})
 
 	t.Run("versionは未知コマンド扱い", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, out, errOut := runCli(t, ex, []string{"version"})
+		code, out, errOut := runCliEmpty(t, []string{"version"})
 		if code != 3 {
 			t.Fatalf("Run(version): exit = %d, want 3", code)
 		}
@@ -175,8 +125,7 @@ func TestCliVersionOldFormsAreUnknown(t *testing.T) {
 }
 
 func TestCliUnknownCommand(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, _, errOut := runCli(t, ex, []string{"frobnicate"})
+	code, _, errOut := runCliEmpty(t, []string{"frobnicate"})
 	if code != 3 {
 		t.Fatalf("Run(unknown) exit = %d, want 3", code)
 	}
@@ -187,18 +136,26 @@ func TestCliUnknownCommand(t *testing.T) {
 
 func TestCliDiffIsRemoved(t *testing.T) {
 	for _, args := range [][]string{{"diff"}, {"diff", "--target", "win"}} {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, args)
+		store := t.TempDir()
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		code, _, _ := runCli(t, store, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
-		}
-		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
-			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
 }
 
 func TestCliDryRunDispatchesTarget(t *testing.T) {
+	newWinStore := func(t *testing.T) (string, string) {
+		return setupStoreWithHome(t,
+			map[string]string{"common.conf": "same\n", "win.conf": "new\n"},
+			map[string]string{".common.conf": "same\n", ".win.conf": "old\n"},
+			"[entries]\n"+
+				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
+				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+		)
+	}
 	t.Run("push", func(t *testing.T) {
 		tests := []struct {
 			name string
@@ -211,19 +168,25 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				ex := &fakeExecutor{}
-				code, _, _ := runCli(t, ex, tt.args)
-				if code != 0 {
-					t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+				store, _ := newWinStore(t)
+				code, out, _ := runCli(t, store, tt.args)
+				if tt.want == "" {
+					if code != 0 {
+						t.Fatalf("Run(%v) exit = %d, want 0 (no applicable diff)", tt.args, code)
+					}
+					if out != "No changes.\n" {
+						t.Errorf("Run(%v): stdout = %q, want No changes.", tt.args, out)
+					}
+					return
 				}
-				if ex.pushDryRunCalls != 1 {
-					t.Fatalf("PushDryRun calls = %d, want 1", ex.pushDryRunCalls)
+				if code == 0 {
+					t.Fatalf("Run(%v) exit = 0, want non-zero (win diff)", tt.args)
 				}
-				if ex.pushDryRunTarget != tt.want {
-					t.Errorf("PushDryRun target = %q, want %q", ex.pushDryRunTarget, tt.want)
+				if !strings.Contains(out, "win.conf") {
+					t.Errorf("Run(%v): output should contain win diff, got %q", tt.args, out)
 				}
-				if ex.pushCalls != 0 {
-					t.Errorf("Push must not run on dry-run")
+				if strings.Contains(out, "common.conf") {
+					t.Errorf("Run(%v): must not contain diff-free entry, got %q", tt.args, out)
 				}
 			})
 		}
@@ -240,19 +203,25 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				ex := &fakeExecutor{}
-				code, _, _ := runCli(t, ex, tt.args)
-				if code != 0 {
-					t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+				store, _ := setupStoreWithHome(t,
+					map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
+					map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
+					"[entries]\n"+
+						`"~/.common.conf" = { src = "common.conf" }`+"\n"+
+						`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+				)
+				code, out, _ := runCli(t, store, tt.args)
+				if tt.want == "" {
+					if code != 0 {
+						t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+					}
+					return
 				}
-				if ex.pullDryRunCalls != 1 {
-					t.Fatalf("PullDryRun calls = %d, want 1", ex.pullDryRunCalls)
+				if code == 0 {
+					t.Fatalf("Run(%v) exit = 0, want non-zero", tt.args)
 				}
-				if ex.pullDryRunTarget != tt.want {
-					t.Errorf("PullDryRun target = %q, want %q", ex.pullDryRunTarget, tt.want)
-				}
-				if ex.pullCalls != 0 {
-					t.Errorf("Pull must not run on dry-run")
+				if !strings.Contains(out, "win.conf") {
+					t.Errorf("Run(%v): output should contain win diff, got %q", tt.args, out)
 				}
 			})
 		}
@@ -264,16 +233,20 @@ func TestCliColorRequiresDryRun(t *testing.T) {
 		{"push", "--color=always"},
 		{"pull", "--color=always"},
 	} {
-		ex := &fakeExecutor{}
-		code, _, errOut := runCli(t, ex, args)
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, _, errOut := runCli(t, store, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
 		if !strings.Contains(errOut, "--color requires --dry-run") {
 			t.Errorf("Run(%v): stderr should contain --color requires --dry-run, got %q", args, errOut)
 		}
-		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
-			t.Errorf("Run(%v): executor must not run", args)
+		if got, err := os.ReadFile(filepath.Join(store, "vimrc")); err != nil || string(got) != "same\n" {
+			t.Errorf("Store must be unchanged when --color without --dry-run")
 		}
 	}
 }
@@ -285,8 +258,7 @@ func TestCliStandardUsageError(t *testing.T) {
 		{"push", "--unknown"},
 		{"pull", "--unknown"},
 	} {
-		ex := &fakeExecutor{}
-		code, out, errOut := runCli(t, ex, args)
+		code, out, errOut := runCliEmpty(t, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
@@ -295,9 +267,6 @@ func TestCliStandardUsageError(t *testing.T) {
 		}
 		if !strings.Contains(out, "USAGE:") {
 			t.Errorf("Run(%v): stdout should contain USAGE:, got %q", args, out)
-		}
-		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
-			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
 }
@@ -314,13 +283,9 @@ func TestCliEmptyAndExtraArgsStillRejected(t *testing.T) {
 		{"push", "--dry-run", "extra-positional"},
 		{"pull", "--dry-run", "extra-positional"},
 	} {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, args)
+		code, _, _ := runCliEmpty(t, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
-		}
-		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls+ex.initCalls != 0 {
-			t.Errorf("Run(%v): executor must not run", args)
 		}
 	}
 }
@@ -336,8 +301,7 @@ func TestCliCommandHelp(t *testing.T) {
 		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
 	}
 	for _, tt := range tests {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, tt.args)
+		code, out, _ := runCliEmpty(t, tt.args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
 		}
@@ -350,27 +314,36 @@ func TestCliCommandHelp(t *testing.T) {
 }
 
 func TestCliPushDispatchesTarget(t *testing.T) {
+	entriesToml := "[entries]\n" +
+		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
+		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
+	storeFiles := map[string]string{"common.conf": "common\n", "win.conf": "win\n"}
 	tests := []struct {
 		name string
 		args []string
-		want string
+		want []string
+		skip []string
 	}{
-		{"no target", []string{"push"}, ""},
-		{"space form", []string{"push", "--target", "win"}, "win"},
-		{"equals form", []string{"push", "--target=win"}, "win"},
+		{"no target", []string{"push"}, []string{".common.conf"}, []string{".win.conf"}},
+		{"space form", []string{"push", "--target", "win"}, []string{".common.conf", ".win.conf"}, nil},
+		{"equals form", []string{"push", "--target=win"}, []string{".common.conf", ".win.conf"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ex := &fakeExecutor{}
-			code, _, _ := runCli(t, ex, tt.args)
+			store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+			code, _, errOut := runCli(t, store, tt.args)
 			if code != 0 {
-				t.Fatalf("Run(%v) exit = %d, want 0", tt.args, code)
+				t.Fatalf("Run(%v) exit = %d, want 0 (stderr=%q)", tt.args, code, errOut)
 			}
-			if ex.pushCalls != 1 {
-				t.Fatalf("Push calls = %d, want 1", ex.pushCalls)
+			for _, f := range tt.want {
+				if _, err := os.Stat(filepath.Join(home, f)); err != nil {
+					t.Errorf("Run(%v): %s should be copied: %v", tt.args, f, err)
+				}
 			}
-			if ex.pushTarget != tt.want {
-				t.Errorf("Push target = %q, want %q", ex.pushTarget, tt.want)
+			for _, f := range tt.skip {
+				if _, err := os.Stat(filepath.Join(home, f)); err == nil {
+					t.Errorf("Run(%v): %s should NOT be copied", tt.args, f)
+				}
 			}
 		})
 	}
@@ -378,63 +351,97 @@ func TestCliPushDispatchesTarget(t *testing.T) {
 
 func TestCliShortFlags(t *testing.T) {
 	t.Run("push -t は --target と同じ", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"push", "-t", "win"})
+		store, home := setupStoreWithHome(t,
+			map[string]string{"common.conf": "common\n", "win.conf": "win\n"},
+			nil,
+			"[entries]\n"+
+				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
+				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+		)
+		code, _, errOut := runCli(t, store, []string{"push", "-t", "win"})
 		if code != 0 {
-			t.Fatalf("Run(push -t win) exit = %d, want 0", code)
+			t.Fatalf("Run(push -t win) exit = %d, want 0 (stderr=%q)", code, errOut)
 		}
-		if ex.pushCalls != 1 || ex.pushTarget != "win" {
-			t.Errorf("Push calls = %d target = %q, want 1/win", ex.pushCalls, ex.pushTarget)
+		for _, f := range []string{".common.conf", ".win.conf"} {
+			if _, err := os.Stat(filepath.Join(home, f)); err != nil {
+				t.Errorf("%s should be copied: %v", f, err)
+			}
 		}
 	})
 	t.Run("pull -t は --target と同じ", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"pull", "-t", "win"})
+		store, _ := setupStoreWithHome(t,
+			nil,
+			map[string]string{".common.conf": "common\n", ".win.conf": "win\n"},
+			"[entries]\n"+
+				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
+				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+		)
+		code, _, errOut := runCli(t, store, []string{"pull", "-t", "win"})
 		if code != 0 {
-			t.Fatalf("Run(pull -t win) exit = %d, want 0", code)
+			t.Fatalf("Run(pull -t win) exit = %d, want 0 (stderr=%q)", code, errOut)
 		}
-		if ex.pullCalls != 1 || ex.pullTarget != "win" {
-			t.Errorf("Pull calls = %d target = %q, want 1/win", ex.pullCalls, ex.pullTarget)
+		for _, f := range []string{"common.conf", "win.conf"} {
+			if _, err := os.Stat(filepath.Join(store, f)); err != nil {
+				t.Errorf("%s should be pulled: %v", f, err)
+			}
 		}
 	})
 	t.Run("push -n は --dry-run と同じ", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"push", "-n"})
-		if code != 0 {
-			t.Fatalf("Run(push -n) exit = %d, want 0", code)
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, out, _ := runCli(t, store, []string{"push", "-n"})
+		if code == 0 {
+			t.Fatal("Run(push -n) with changes: exit = 0, want non-zero")
 		}
-		if ex.pushDryRunCalls != 1 || ex.pushCalls != 0 {
-			t.Errorf("must delegate to PushDryRun only")
+		if !strings.Contains(out, "---") {
+			t.Errorf("output should contain diff, got %q", out)
 		}
 	})
 	t.Run("pull -n -t の併用", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"pull", "-n", "-t", "win"})
-		if code != 0 {
-			t.Fatalf("Run(pull -n -t win) exit = %d, want 0", code)
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
+			map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
+			"[entries]\n"+
+				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
+				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+		)
+		code, out, _ := runCli(t, store, []string{"pull", "-n", "-t", "win"})
+		if code == 0 {
+			t.Fatal("Run(pull -n -t win) with changes: exit = 0, want non-zero")
 		}
-		if ex.pullDryRunCalls != 1 || ex.pullDryRunTarget != "win" {
-			t.Errorf("PullDryRun calls = %d target = %q, want 1/win", ex.pullDryRunCalls, ex.pullDryRunTarget)
+		if !strings.Contains(out, "win.conf") {
+			t.Errorf("output should contain win diff, got %q", out)
 		}
 	})
 	t.Run("push -n -c は --color と同じ", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"push", "-n", "-c", "always"})
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, out, _ := runCli(t, store, []string{"push", "-n", "-c", "always"})
 		if code != 0 {
 			t.Fatalf("Run(push -n -c always) exit = %d, want 0", code)
 		}
-		if ex.pushDryRunCalls != 1 || ex.pushDryRunColor != "always" {
-			t.Errorf("PushDryRun calls = %d color = %q, want 1/always", ex.pushDryRunCalls, ex.pushDryRunColor)
+		if out != "No changes.\n" {
+			t.Errorf("stdout = %q, want No changes.", out)
 		}
 	})
 	t.Run("push -c 単独は --dry-run 必須エラー", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"push", "-c", "always"})
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, _, errOut := runCli(t, store, []string{"push", "-c", "always"})
 		if code == 0 {
 			t.Fatal("Run(push -c always): exit = 0, want non-zero")
 		}
-		if ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls+ex.pullDryRunCalls != 0 {
-			t.Error("executor must not run")
+		if !strings.Contains(errOut, "--color requires --dry-run") {
+			t.Errorf("stderr should contain --color requires --dry-run, got %q", errOut)
 		}
 	})
 }
@@ -452,8 +459,7 @@ func TestCliTargetFlagErrors(t *testing.T) {
 		{"push", "--dry-run", "--target="},
 		{"pull", "--dry-run", "--target="},
 	} {
-		ex := &fakeExecutor{}
-		if code, _, _ := runCli(t, ex, args); code == 0 {
+		if code, _, _ := runCliEmpty(t, args); code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
 		}
 	}
@@ -461,38 +467,53 @@ func TestCliTargetFlagErrors(t *testing.T) {
 
 func TestCliDryRunDelegatesExitCode(t *testing.T) {
 	t.Run("push", func(t *testing.T) {
-		ex := &fakeExecutor{pushDryRunCode: 1, pushDryRunOut: "--- a\n+++ b\n"}
-		code, out, _ := runCli(t, ex, []string{"push", "--dry-run"})
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, out, _ := runCli(t, store, []string{"push", "--dry-run"})
 		if code != 1 {
 			t.Fatalf("Run(push --dry-run) exit = %d, want 1", code)
 		}
-		if ex.pushDryRunCalls != 1 || ex.pushCalls+ex.pullCalls+ex.pullDryRunCalls != 0 {
-			t.Errorf("must delegate to PushDryRun only")
-		}
 		if !strings.Contains(out, "---") {
 			t.Errorf("output should contain diff, got %q", out)
 		}
+		if got, err := os.ReadFile(filepath.Join(store, "vimrc")); err != nil || string(got) != "new\n" {
+			t.Error("Store must NOT be written on dry-run")
+		}
 
-		ex = &fakeExecutor{pushDryRunCode: 0}
-		if code, _, _ := runCli(t, ex, []string{"push", "--dry-run"}); code != 0 {
+		store, _ = setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		if code, out, _ := runCli(t, store, []string{"push", "--dry-run"}); code != 0 {
 			t.Errorf("Run(push --dry-run) without changes: exit = %d, want 0", code)
+		} else if out != "No changes.\n" {
+			t.Errorf("stdout = %q, want No changes.", out)
 		}
 	})
 	t.Run("pull", func(t *testing.T) {
-		ex := &fakeExecutor{pullDryRunCode: 1, pullDryRunOut: "--- a\n+++ b\n"}
-		code, out, _ := runCli(t, ex, []string{"pull", "--dry-run"})
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		code, out, _ := runCli(t, store, []string{"pull", "--dry-run"})
 		if code != 1 {
 			t.Fatalf("Run(pull --dry-run) exit = %d, want 1", code)
-		}
-		if ex.pullDryRunCalls != 1 || ex.pushCalls+ex.pullCalls+ex.pushDryRunCalls != 0 {
-			t.Errorf("must delegate to PullDryRun only")
 		}
 		if !strings.Contains(out, "---") {
 			t.Errorf("output should contain diff, got %q", out)
 		}
 
-		ex = &fakeExecutor{pullDryRunCode: 0}
-		if code, _, _ := runCli(t, ex, []string{"pull", "--dry-run"}); code != 0 {
+		store, _ = setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		)
+		if code, _, _ := runCli(t, store, []string{"pull", "--dry-run"}); code != 0 {
 			t.Errorf("Run(pull --dry-run) without changes: exit = %d, want 0", code)
 		}
 	})
@@ -501,18 +522,15 @@ func TestCliDryRunDelegatesExitCode(t *testing.T) {
 func TestCliDryRunColorFlag(t *testing.T) {
 	t.Run("既定はauto", func(t *testing.T) {
 		for _, args := range [][]string{{"push", "--dry-run"}, {"pull", "--dry-run"}} {
-			ex := &fakeExecutor{}
-			if code, _, _ := runCli(t, ex, args); code != 0 {
+			store, _ := setupStoreWithHome(t,
+				map[string]string{"vimrc": "same\n"},
+				map[string]string{".vimrc": "same\n"},
+				"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			)
+			if code, out, _ := runCli(t, store, args); code != 0 {
 				t.Fatalf("Run(%v) exit = %d, want 0", args, code)
-			}
-			var got string
-			if args[0] == "push" {
-				got = ex.pushDryRunColor
-			} else {
-				got = ex.pullDryRunColor
-			}
-			if got != "auto" {
-				t.Errorf("Run(%v) default color = %q, want auto", args, got)
+			} else if out != "No changes.\n" {
+				t.Errorf("Run(%v): stdout = %q, want No changes.", args, out)
 			}
 		}
 	})
@@ -520,19 +538,14 @@ func TestCliDryRunColorFlag(t *testing.T) {
 	t.Run("always/neverを通す", func(t *testing.T) {
 		for _, c := range []string{"always", "never"} {
 			for _, base := range []string{"push", "pull"} {
-				ex := &fakeExecutor{}
+				store, _ := setupStoreWithHome(t,
+					map[string]string{"vimrc": "same\n"},
+					map[string]string{".vimrc": "same\n"},
+					"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+				)
 				args := []string{base, "--dry-run", "--color=" + c}
-				if code, _, _ := runCli(t, ex, args); code != 0 {
+				if code, _, _ := runCli(t, store, args); code != 0 {
 					t.Errorf("Run(%v) exit = %d, want 0", args, code)
-				}
-				var got string
-				if base == "push" {
-					got = ex.pushDryRunColor
-				} else {
-					got = ex.pullDryRunColor
-				}
-				if got != c {
-					t.Errorf("Run(%v) color = %q, want %q", args, got, c)
 				}
 			}
 		}
@@ -540,53 +553,49 @@ func TestCliDryRunColorFlag(t *testing.T) {
 
 	t.Run("不正値はexit1", func(t *testing.T) {
 		for _, base := range []string{"push", "pull"} {
-			ex := &fakeExecutor{}
 			args := []string{base, "--dry-run", "--color=foo"}
-			if code, _, errOut := runCli(t, ex, args); code == 0 {
+			if code, _, errOut := runCliEmpty(t, args); code == 0 {
 				t.Error("exit = 0, want non-zero")
 			} else if !strings.Contains(errOut, "invalid value for --color") {
 				t.Errorf("stderr should contain invalid value, got %q", errOut)
-			}
-			if ex.pushDryRunCalls+ex.pullDryRunCalls != 0 {
-				t.Error("executor must not run on invalid color")
 			}
 		}
 	})
 }
 
-func TestCliExecutorErrorExitsNonZero(t *testing.T) {
-	ex := &fakeExecutor{pushErr: errors.New("boom")}
-	code, _, errOut := runCli(t, ex, []string{"push"})
+func TestCliPushErrorExitsNonZero(t *testing.T) {
+	empty := t.TempDir()
+	code, _, errOut := runCli(t, empty, []string{"push"})
 	if code == 0 {
-		t.Fatal("Run(push) with executor error: exit = 0, want non-zero")
+		t.Fatal("Run(push) without Store: exit = 0, want non-zero")
 	}
-	if !strings.Contains(errOut, "boom") {
-		t.Errorf("stderr should contain executor error, got %q", errOut)
+	if !strings.Contains(errOut, "mdots.toml not found") {
+		t.Errorf("stderr should contain not-found error, got %q", errOut)
 	}
 }
 
 // Seam: CLIコマンド境界 (init 雛形作成)
 // 成功・help・余分引数・実行エラーの外部挙動のみを検証する。
 func TestCliInitDispatches(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, out, _ := runCli(t, ex, []string{"init"})
+	cwd := t.TempDir()
+	code, out, _ := runCli(t, cwd, []string{"init"})
 	if code != 0 {
 		t.Fatalf("Run(init) exit = %d, want 0", code)
-	}
-	if ex.initCalls != 1 {
-		t.Fatalf("Init calls = %d, want 1", ex.initCalls)
 	}
 	for _, want := range []string{"created", "mdots.toml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output should contain %q, got %q", want, out)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(cwd, "mdots.toml")); err != nil {
+		t.Errorf("mdots.toml should be created: %v", err)
+	}
 }
 
 func TestCliInitHelp(t *testing.T) {
 	for _, args := range [][]string{{"init", "--help"}, {"init", "-h"}} {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, args)
+		cwd := t.TempDir()
+		code, out, _ := runCli(t, cwd, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
@@ -595,27 +604,27 @@ func TestCliInitHelp(t *testing.T) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
 		}
-		if ex.initCalls != 0 {
-			t.Errorf("Run(%v): Init must not run on --help", args)
+		if _, err := os.Stat(filepath.Join(cwd, "mdots.toml")); err == nil {
+			t.Errorf("Run(%v): mdots.toml must not be created on --help", args)
 		}
 	}
 }
 
 func TestCliInitRejectsExtraArgs(t *testing.T) {
-	ex := &fakeExecutor{}
-	if code, _, _ := runCli(t, ex, []string{"init", "extra"}); code == 0 {
+	cwd := t.TempDir()
+	if code, _, _ := runCli(t, cwd, []string{"init", "extra"}); code == 0 {
 		t.Error("Run(init extra): exit = 0, want non-zero")
 	}
-	if ex.initCalls != 0 {
-		t.Error("Init must not run with extra args")
+	if _, err := os.Stat(filepath.Join(cwd, "mdots.toml")); err == nil {
+		t.Error("mdots.toml must not be created with extra args")
 	}
 }
 
-func TestCliInitExecutorError(t *testing.T) {
-	ex := &fakeExecutor{initErr: errors.New("mdots.toml already exists in /tmp/x")}
-	code, _, errOut := runCli(t, ex, []string{"init"})
+func TestCliInitAlreadyExists(t *testing.T) {
+	store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+	code, _, errOut := runCli(t, store, []string{"init"})
 	if code == 0 {
-		t.Fatal("Run(init) with executor error: exit = 0, want non-zero")
+		t.Fatal("Run(init) on existing Store: exit = 0, want non-zero")
 	}
 	if !strings.Contains(errOut, "mdots.toml already exists") {
 		t.Errorf("stderr should contain already exists, got %q", errOut)
@@ -625,13 +634,15 @@ func TestCliInitExecutorError(t *testing.T) {
 // Seam: CLIコマンド境界 (targets 一覧表示)
 // 定義済みTarget名の一覧表示の外部挙動のみを検証する。
 func TestCliTargetsDispatches(t *testing.T) {
-	ex := &fakeExecutor{targetsOut: []string{"win", "wsl"}}
-	code, out, _ := runCli(t, ex, []string{"targets"})
+	store, _ := setupStoreWithHome(t, nil, nil,
+		"[entries]\n"+
+			`"~/.c" = { targets = { wsl = { src = "c-wsl" }, win = { src = "c-win" } } }`+"\n"+
+			`"~/.b" = { targets = { win = { src = "b-win" } } }`+"\n"+
+			`"~/.a" = { src = "a" }`+"\n",
+	)
+	code, out, _ := runCli(t, store, []string{"targets"})
 	if code != 0 {
 		t.Fatalf("Run(targets) exit = %d, want 0", code)
-	}
-	if ex.targetsCalls != 1 {
-		t.Fatalf("Targets calls = %d, want 1", ex.targetsCalls)
 	}
 	if out != "win\nwsl\n" {
 		t.Errorf("output = %q, want %q", out, "win\nwsl\n")
@@ -639,8 +650,10 @@ func TestCliTargetsDispatches(t *testing.T) {
 }
 
 func TestCliTargetsEmpty(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, out, _ := runCli(t, ex, []string{"targets"})
+	store, _ := setupStoreWithHome(t, nil, nil,
+		"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+	)
+	code, out, _ := runCli(t, store, []string{"targets"})
 	if code != 0 {
 		t.Fatalf("Run(targets) exit = %d, want 0", code)
 	}
@@ -650,45 +663,41 @@ func TestCliTargetsEmpty(t *testing.T) {
 }
 
 func TestCliTargetsRejectsExtraArgs(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, _, errOut := runCli(t, ex, []string{"targets", "extra"})
+	store, _ := setupStoreWithHome(t, nil, nil,
+		"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+	)
+	code, _, errOut := runCli(t, store, []string{"targets", "extra"})
 	if code == 0 {
 		t.Error("Run(targets extra): exit = 0, want non-zero")
 	}
 	if !strings.Contains(errOut, "unknown argument: extra") {
 		t.Errorf("stderr should contain unknown argument, got %q", errOut)
 	}
-	if ex.targetsCalls != 0 {
-		t.Error("Targets must not run with extra args")
-	}
 }
 
-func TestCliTargetsExecutorError(t *testing.T) {
-	ex := &fakeExecutor{targetsErr: errors.New("mdots.toml not found in /tmp/x")}
-	code, _, errOut := runCli(t, ex, []string{"targets"})
+func TestCliTargetsWithoutStore(t *testing.T) {
+	empty := t.TempDir()
+	code, _, errOut := runCli(t, empty, []string{"targets"})
 	if code == 0 {
-		t.Fatal("Run(targets) with executor error: exit = 0, want non-zero")
+		t.Fatal("Run(targets) without Store: exit = 0, want non-zero")
 	}
 	if !strings.Contains(errOut, "mdots.toml not found") {
-		t.Errorf("stderr should contain executor error, got %q", errOut)
+		t.Errorf("stderr should contain not-found error, got %q", errOut)
 	}
 }
 
-// Seam: CLIコマンド境界 (add 登録委譲)
-// 位置引数1件の委譲・成功文面・引数なし/余剰/未知フラグ拒否・実行エラーの
-// 外部挙動のみを検証する。実FSには触れない。global helpのadd/targets掲載は
-// TestCliGlobalHelp に寄せる。
+// Seam: CLIコマンド境界 (add 登録)
+// 位置引数1件の登録・成功文面・引数なし/余剰/未知フラグ拒否・実行エラーの
+// 外部挙動のみを検証する。実Store/HOME上の結合で確認する。
 func TestCliAddDispatches(t *testing.T) {
-	ex := &fakeExecutor{addKey: "~/.vimrc", addSrc: "dotfiles/.vimrc"}
-	code, out, _ := runCli(t, ex, []string{"add", "~/.vimrc"})
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "set number\n"},
+		"[entries]\n",
+	)
+	code, out, _ := runCli(t, store, []string{"add", "~/.vimrc"})
 	if code != 0 {
 		t.Fatalf("Run(add ~/.vimrc) exit = %d, want 0", code)
-	}
-	if ex.addCalls != 1 {
-		t.Fatalf("Add calls = %d, want 1", ex.addCalls)
-	}
-	if ex.addDest != "~/.vimrc" {
-		t.Errorf("Add dest = %q, want %q", ex.addDest, "~/.vimrc")
 	}
 	if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "dotfiles/.vimrc") {
 		t.Errorf("output should contain key and src in one line, got %q", out)
@@ -696,12 +705,23 @@ func TestCliAddDispatches(t *testing.T) {
 	if strings.Count(strings.TrimSuffix(out, "\n"), "\n") != 0 {
 		t.Errorf("output should be one line, got %q", out)
 	}
+	body, err := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "~/.vimrc") {
+		t.Errorf("mdots.toml should contain new Entry, got:\n%s", body)
+	}
 }
 
 func TestCliAddHelp(t *testing.T) {
 	for _, args := range [][]string{{"add", "--help"}, {"add", "-h"}} {
-		ex := &fakeExecutor{}
-		code, out, _ := runCli(t, ex, args)
+		store, _ := setupStoreWithHome(t,
+			nil,
+			map[string]string{".vimrc": "x\n"},
+			"[entries]\n",
+		)
+		code, out, _ := runCli(t, store, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
 		}
@@ -710,7 +730,11 @@ func TestCliAddHelp(t *testing.T) {
 				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
 			}
 		}
-		if ex.addCalls != 0 {
+		body, err := os.ReadFile(filepath.Join(store, "mdots.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), ".vimrc") && strings.Contains(string(body), "dotfiles") {
 			t.Errorf("Run(%v): Add must not run on --help", args)
 		}
 	}
@@ -718,31 +742,25 @@ func TestCliAddHelp(t *testing.T) {
 
 func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
 	t.Run("引数なしは拒否", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, []string{"add"})
+		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		code, _, _ := runCli(t, store, []string{"add"})
 		if code == 0 {
 			t.Error("Run(add): exit = 0, want non-zero")
 		}
-		if ex.addCalls != 0 {
-			t.Error("Add must not run without args")
-		}
 	})
 	t.Run("余剰は拒否", func(t *testing.T) {
-		ex := &fakeExecutor{}
-		code, _, errOut := runCli(t, ex, []string{"add", "~/.a", "~/.b"})
+		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		code, _, errOut := runCli(t, store, []string{"add", "~/.a", "~/.b"})
 		if code == 0 {
 			t.Error("Run(add a b): exit = 0, want non-zero")
 		}
 		if !strings.Contains(errOut, "unknown argument: ~/.b") {
 			t.Errorf("stderr should contain unknown argument, got %q", errOut)
 		}
-		if ex.addCalls != 0 {
-			t.Error("Add must not run with extra args")
-		}
 	})
 }
 
-// Seam: CLIコマンド境界 (add --target 委譲)
+// Seam: CLIコマンド境界 (add --target 登録)
 // --target/-t の解釈・空値拒否・成功文面の外部挙動を検証する。
 func TestCliAddWithTargetDispatches(t *testing.T) {
 	for _, args := range [][]string{
@@ -750,19 +768,14 @@ func TestCliAddWithTargetDispatches(t *testing.T) {
 		{"add", "--target=win", "~/.vimrc"},
 		{"add", "-t", "win", "~/.vimrc"},
 	} {
-		ex := &fakeExecutor{addKey: "~/.vimrc", addSrc: "dotfiles/win/.vimrc"}
-		code, out, _ := runCli(t, ex, args)
+		store, _ := setupStoreWithHome(t,
+			nil,
+			map[string]string{".vimrc": "set number\n"},
+			"[entries]\n",
+		)
+		code, out, _ := runCli(t, store, args)
 		if code != 0 {
 			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
-		}
-		if ex.addCalls != 1 {
-			t.Fatalf("Run(%v): Add calls = %d, want 1", args, ex.addCalls)
-		}
-		if ex.addDest != "~/.vimrc" {
-			t.Errorf("Run(%v): Add dest = %q, want %q", args, ex.addDest, "~/.vimrc")
-		}
-		if ex.addTarget != "win" {
-			t.Errorf("Run(%v): Add target = %q, want %q", args, ex.addTarget, "win")
 		}
 		if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "win") || !strings.Contains(out, "dotfiles/win/.vimrc") {
 			t.Errorf("Run(%v): output should contain key, target and src, got %q", args, out)
@@ -774,13 +787,10 @@ func TestCliAddWithTargetDispatches(t *testing.T) {
 }
 
 func TestCliAddRejectsEmptyTarget(t *testing.T) {
-	ex := &fakeExecutor{}
-	code, _, _ := runCli(t, ex, []string{"add", "--target=", "~/.vimrc"})
+	store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+	code, _, _ := runCli(t, store, []string{"add", "--target=", "~/.vimrc"})
 	if code == 0 {
 		t.Error("Run(add --target=): exit = 0, want non-zero")
-	}
-	if ex.addCalls != 0 {
-		t.Error("Add must not run with empty target")
 	}
 }
 
@@ -791,24 +801,25 @@ func TestCliAddRejectsFlags(t *testing.T) {
 		{"add", "--unknown", "~/.vimrc"},
 		{"add", "~/.vimrc", "--unknown"},
 	} {
-		ex := &fakeExecutor{}
-		code, _, _ := runCli(t, ex, args)
+		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		code, _, _ := runCli(t, store, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
-		}
-		if ex.addCalls != 0 {
-			t.Errorf("Run(%v): Add must not run with flags", args)
 		}
 	}
 }
 
-func TestCliAddExecutorError(t *testing.T) {
-	ex := &fakeExecutor{addErr: errors.New("entries[\"~/.vimrc\"]: already registered")}
-	code, _, errOut := runCli(t, ex, []string{"add", "~/.vimrc"})
+func TestCliAddDuplicateError(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "x\n"},
+		"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
+	)
+	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc"})
 	if code == 0 {
-		t.Fatal("Run(add) with executor error: exit = 0, want non-zero")
+		t.Fatal("Run(add duplicate): exit = 0, want non-zero")
 	}
 	if !strings.Contains(errOut, "already registered") {
-		t.Errorf("stderr should contain executor error, got %q", errOut)
+		t.Errorf("stderr should contain already registered, got %q", errOut)
 	}
 }

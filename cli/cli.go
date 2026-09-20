@@ -4,7 +4,7 @@
 // --target/--dry-run/--color を定義する）。
 //
 // CLI表面（help/version/unknown/usage時の文面・exit）は枠組み既定に寄せる。
-// 内部実行は Executor 委譲とし、エントリは薄く保つ。
+// 内部実行は app 直接呼出とし、エントリは薄く保つ.
 package cli
 
 import (
@@ -13,20 +13,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/mogurastore/mdots/app"
 	cliv3 "github.com/urfave/cli/v3"
 )
-
-// Executor は push/pull/init/targets/add の内部実行系への委譲口である。
-// 表面（文面・exit）は本パッケージが保ち、副作用のある処理だけを委譲する。
-type Executor interface {
-	Push(cwd, target string) error
-	Pull(cwd, target string) error
-	PushDryRun(cwd, target, color string, stdout, stderr io.Writer) int
-	PullDryRun(cwd, target, color string, stdout, stderr io.Writer) int
-	Init(cwd string) error
-	Targets(cwd string) ([]string, error)
-	Add(cwd, dest, target string) (string, string, error)
-}
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
 // 出力は Action 側で済ませているため文面を持たない。
@@ -37,7 +26,6 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit %d", e.code) }
 // runner は1回の Run 呼び出しに対応する宣言ツリーと入出力を束ねる。
 type runner struct {
 	version string
-	exec    Executor
 	cwd     string
 	stdout  io.Writer
 	stderr  io.Writer
@@ -47,8 +35,8 @@ type runner struct {
 // 戻り値はプロセスの exit code。
 // フラグ解釈・help/version/unknown の表面は枠組み既定に任せ、
 // 空値・余剰引数の拒否だけを Action 側で残す。
-func Run(args []string, cwd, version string, ex Executor, stdout, stderr io.Writer) int {
-	r := &runner{version: version, exec: ex, cwd: cwd, stdout: stdout, stderr: stderr}
+func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
+	r := &runner{version: version, cwd: cwd, stdout: stdout, stderr: stderr}
 
 	cmd := r.newCommand()
 	if err := cmd.Run(context.Background(), append([]string{"mdots"}, args...)); err != nil {
@@ -196,7 +184,7 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 		if err != nil {
 			return err
 		}
-		if code := r.exec.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
+		if code := app.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
 		return nil
@@ -205,7 +193,7 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
 		return &exitError{code: 1}
 	}
-	if err := r.exec.Push(r.cwd, target); err != nil {
+	if err := app.Push(r.cwd, target, r.stderr); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
@@ -222,7 +210,7 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		if err != nil {
 			return err
 		}
-		if code := r.exec.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
+		if code := app.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
 			return &exitError{code: code}
 		}
 		return nil
@@ -231,7 +219,7 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
 		return &exitError{code: 1}
 	}
-	if err := r.exec.Pull(r.cwd, target); err != nil {
+	if err := app.Pull(r.cwd, target, r.stderr); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
@@ -242,7 +230,7 @@ func (r *runner) initAction(_ context.Context, cmd *cliv3.Command) error {
 	if cmd.Args().Present() {
 		return r.argError(cmd.Args().First())
 	}
-	if err := r.exec.Init(r.cwd); err != nil {
+	if err := app.Init(r.cwd); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
@@ -254,7 +242,7 @@ func (r *runner) targetsAction(_ context.Context, cmd *cliv3.Command) error {
 	if cmd.Args().Present() {
 		return r.argError(cmd.Args().First())
 	}
-	names, err := r.exec.Targets(r.cwd)
+	names, err := app.Targets(r.cwd)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
@@ -279,7 +267,7 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 	if err != nil {
 		return err
 	}
-	key, src, err := r.exec.Add(r.cwd, dest, target)
+	key, src, err := app.Add(r.cwd, dest, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
