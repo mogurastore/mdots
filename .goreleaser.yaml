@@ -3,7 +3,7 @@ version: 2
 project_name: mdots
 
 builds:
-  - main: .
+  - main: ./cmd/mdots
     binary: mdots
     goos:
       - linux

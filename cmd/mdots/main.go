@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/mogurastore/mdots/cli"
+	"github.com/mogurastore/mdots/internal/cli"
 )
 
 // version はリリース時に ldflags -X main.version=<tag> で埋め込む。
@@ -26,7 +26,7 @@ func run(args []string, cwd string) int {
 }
 
 // runWithWriters は CLI の薄い入口である。表面の定義と実行系は
-// cli/app パッケージに置き、本ファイルは組立と Run のみに留める。
+// internal/cli・internal/app パッケージに置き、本ファイルは組立と Run のみに留める。
 func runWithWriters(args []string, cwd string, stdout, stderr io.Writer) int {
 	return cli.Run(args, cwd, version, stdout, stderr)
 }

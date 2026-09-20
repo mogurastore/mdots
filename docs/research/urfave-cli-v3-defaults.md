@@ -1,5 +1,12 @@
 # urfave/cli v3.11.0 デフォルト挙動の一次情報調査
 
+> 移設メモ（2026-09-20）: `cli/`→`internal/cli/`、`app/`→`internal/app/`、
+> `config/`→`internal/config/`、`sync/`→`internal/sync/`、root `main.go`・
+> E2E→`cmd/mdots/` に移設。以下のパス・行番号は移設前のスナップショットであり、
+> 読み替え（例: `cli/cli.go`→`internal/cli/cli.go`、`cli/cli_test.go`→
+> `internal/cli/cli_test.go`、root `main_test.go`/`cli_test.go`/`add_test.go`→
+> `cmd/mdots/e2e_test.go`＋`internal/app/*_test.go`＋`internal/cli/surface_test.go`）で参照すること。
+
 - 調査日: 2026-09-06
 - 対象バージョン: `github.com/urfave/cli/v3 v3.11.0`（`go.mod:7` で確認。以下「v3.11.0」）
 - 一次情報の範囲: 公式ドキュメント（https://cli.urfave.org/）、v3.11.0 のソースコード

@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mogurastore/mdots/config"
-	"github.com/mogurastore/mdots/sync"
+	"github.com/mogurastore/mdots/internal/config"
+	"github.com/mogurastore/mdots/internal/sync"
 )
 
 // Add は未登録の既存ファイルを新規Entryとして登録する。

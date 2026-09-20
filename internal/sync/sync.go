@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mogurastore/mdots/config"
 	gd "github.com/amterp/go-delta"
+	"github.com/mogurastore/mdots/internal/config"
 	"golang.org/x/term"
 )
 
