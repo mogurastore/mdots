@@ -670,8 +670,60 @@ func TestAppendOmitsEmptyParentHeaders(t *testing.T) {
 	}
 }
 
+// Seam: config パッケージ公開境界 (add向け追記の空行区切り)
+// 非空ファイルへの追記は空行1行で区切り、空行済みは重ねない外部挙動を検証する。
+func TestAppendInsertsBlankLineSeparator(t *testing.T) {
+	t.Run("単一改行終わりは空行1行を挿む", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		before := "[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n"
+		if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		got := readFileForTest(t, p)
+		want := before + "\n[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+		if got != want {
+			t.Errorf("空行区切り失敗:\ngot:\n%s\nwant:\n%s", got, want)
+		}
+	})
+	t.Run("空行終わりは重ねない", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		before := "[entries]\n\n"
+		if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		got := readFileForTest(t, p)
+		want := before + "[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+		if got != want {
+			t.Errorf("空行重複失敗:\ngot:\n%s\nwant:\n%s", got, want)
+		}
+	})
+	t.Run("末尾改行なしも空行で区切る", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "mdots.toml")
+		if err := os.WriteFile(p, []byte("[entries]"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendPlainEntry(p, "~/.vimrc", "dotfiles/.vimrc"); err != nil {
+			t.Fatalf("Append error: %v", err)
+		}
+		got := readFileForTest(t, p)
+		want := "[entries]\n\n[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+		if got != want {
+			t.Errorf("末尾改行なしの区切り失敗:\ngot:\n%s\nwant:\n%s", got, want)
+		}
+	})
+}
+
 // Seam: config パッケージ公開境界 (add向け追記記法)
-// テーブル形式・[entries]親ヘッダ行なし・インデントなしの完全一致を検証する。
+// テーブル形式・[entries]親ヘッダ行なし・インデントなし・追記間は空行1行の完全一致を検証する。
 func TestAppendExactFormat(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "mdots.toml")
@@ -688,7 +740,7 @@ func TestAppendExactFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[entries.\"~/.bashrc\"]\nsrc = \"dotfiles/.bashrc\"\n[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
+	want := "[entries.\"~/.bashrc\"]\nsrc = \"dotfiles/.bashrc\"\n\n[entries.\"~/.vimrc\"]\nsrc = \"dotfiles/.vimrc\"\n"
 	if string(data) != want {
 		t.Errorf("保存記法の完全一致失敗:\ngot:\n%s\nwant:\n%s", data, want)
 	}
