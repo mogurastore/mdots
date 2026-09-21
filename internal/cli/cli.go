@@ -156,7 +156,7 @@ func (r *runner) newCommand() *cliv3.Command {
 			},
 			{
 				Name:   "doctor",
-				Usage:  "共有化可能なEntryを検出する",
+				Usage:  "Store上で内容が一致するsrcを検出する",
 				Before: r.rejectExtraArgs(0),
 				Action: r.doctorAction,
 			},
