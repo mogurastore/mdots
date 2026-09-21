@@ -56,7 +56,7 @@ func TestDoctorIgnoresSameDestDifferentContent(t *testing.T) {
 	}
 }
 
-func TestDoctorIgnoresDifferentDestSameContent(t *testing.T) {
+func TestDoctorDetectsDifferentDestSameContent(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		map[string]string{
 			"a-src": "same\n",
@@ -68,11 +68,42 @@ func TestDoctorIgnoresDifferentDestSameContent(t *testing.T) {
 			"[targets.win.\"~/.b\"]\nsrc = \"b-src\"\n",
 	)
 	var out, errOut bytes.Buffer
-	if code := Doctor(store, &out, &errOut); code != 0 {
-		t.Fatalf("Doctor with different dest: exit = %d, want 0", code)
+	if code := Doctor(store, &out, &errOut); code != 1 {
+		t.Fatalf("Doctor with different dest same content: exit = %d, want 1", code)
 	}
-	if out.String() != "No sharable entries.\n" {
-		t.Errorf("stdout = %q, want %q", out.String(), "No sharable entries.\n")
+	got := out.String()
+	for _, want := range []string{"a-src", "b-src", "~/.a", "~/.b"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout should contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestDoctorDetectsCrossTargetDifferentDestSameContent(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		map[string]string{
+			"dotfiles/win/AppData/Roaming/jj/config.toml": "same\n",
+			"dotfiles/wsl/.config/jj/config.toml":         "same\n",
+		},
+		nil,
+		"default_target = \"base\"\n"+
+			"[targets.win.\"~/AppData/Roaming/jj/config.toml\"]\nsrc = \"dotfiles/win/AppData/Roaming/jj/config.toml\"\n"+
+			"[targets.wsl.\"~/.config/jj/config.toml\"]\nsrc = \"dotfiles/wsl/.config/jj/config.toml\"\n",
+	)
+	var out, errOut bytes.Buffer
+	if code := Doctor(store, &out, &errOut); code != 1 {
+		t.Fatalf("Doctor cross-target different dest: exit = %d, want 1", code)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"dotfiles/win/AppData/Roaming/jj/config.toml",
+		"dotfiles/wsl/.config/jj/config.toml",
+		"~/AppData/Roaming/jj/config.toml",
+		"~/.config/jj/config.toml",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout should contain %q, got %q", want, got)
+		}
 	}
 }
 
