@@ -13,8 +13,12 @@ _Avoid_: repo, dotfiles repo
 _Avoid_: mapping, rule
 
 **Target**:
-Entryの適用先を識別する単数文字列（例: win, wsl, linux）。指定なしEntryはTargetに関わらず適用される。
+Entryの適用先を識別する単数文字列（例: win, wsl, linux）。解決は単一 Target のみで、重ねは二度押しで表現する。
 _Avoid_: os, platform, env, common
+
+**default_target**:
+省略時に解決する共有固定の既定 Target 名。
+_Avoid_: fallback
 
 **push**:
 Storeからdestへファイルをコピーする操作。

@@ -10,10 +10,9 @@ import (
 
 // Seam: 実行系境界 (add 登録・pull 回収)
 // 実FS上の Store/HOME を用い、Add/Pull の外部挙動のみを検証する。
+// 省略時は default_target へ登録し、明示時は指定 Target へ登録する。
 // 登録のみ行いコピーしないこと、後続pullで回収できること、エラー時は
-// mdots.tomlが不変であることを確認する。正規化・src算出・保存記法の網羅は
-// internal/config、委譲・文面・exitは internal/cli に寄せる。
-// Store 準備・HOME 隔離は app_test.go の setupStoreWithHome に集約している。
+// mdots.tomlが不変であることを確認する。
 
 func readTomlForAddTest(t *testing.T, store string) string {
 	t.Helper()
@@ -28,44 +27,42 @@ func TestAddRegistersWithoutCopying(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
-		"[entries]\n",
+		"default_target = \"base\"\n",
 	)
 
-	key, src, err := Add(store, "~/.vimrc", "")
+	key, src, resolved, err := Add(store, "~/.vimrc", "")
 	if err != nil {
 		t.Fatalf("Add(~/.vimrc) error = %v, want nil", err)
 	}
-	if key != "~/.vimrc" || src != "dotfiles/.vimrc" {
-		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/.vimrc")
+	if key != "~/.vimrc" || src != "dotfiles/base/.vimrc" || resolved != "base" {
+		t.Errorf("Add = (%q, %q, %q), want (%q, %q, %q)", key, src, resolved, "~/.vimrc", "dotfiles/base/.vimrc", "base")
 	}
 	body := readTomlForAddTest(t, store)
-	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/.vimrc") {
+	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/base/.vimrc") {
 		t.Errorf("mdots.toml should contain new Entry, got:\n%s", body)
 	}
 	if strings.Contains(body, "override") {
 		t.Errorf("added Entry must not write override, got:\n%s", body)
 	}
-	// 登録のみでコピーは行わない。Store側srcはまだ存在しない。
-	if _, err := os.Stat(filepath.Join(store, "dotfiles", ".vimrc")); err == nil {
+	if _, err := os.Stat(filepath.Join(store, "dotfiles", "base", ".vimrc")); err == nil {
 		t.Error("Store src must NOT be created by add (pull collects it)")
 	}
 }
 
 // Seam: 実行系境界 (add --target の登録)
-// targets形式での登録・pull回収を外部挙動で検証する。
 func TestAddWithTargetRegistersTargetsForm(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
-		"[entries]\n",
+		"default_target = \"base\"\n",
 	)
 
-	key, src, err := Add(store, "~/.vimrc", "win")
+	key, src, resolved, err := Add(store, "~/.vimrc", "win")
 	if err != nil {
 		t.Fatalf("Add(~/.vimrc, win) error = %v, want nil", err)
 	}
-	if key != "~/.vimrc" || src != "dotfiles/win/.vimrc" {
-		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/win/.vimrc")
+	if key != "~/.vimrc" || src != "dotfiles/win/.vimrc" || resolved != "win" {
+		t.Errorf("Add = (%q, %q, %q), want (%q, %q, %q)", key, src, resolved, "~/.vimrc", "dotfiles/win/.vimrc", "win")
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "win") || !strings.Contains(body, "dotfiles/win/.vimrc") {
@@ -89,20 +86,19 @@ func TestAddWithTargetRegistersTargetsForm(t *testing.T) {
 	}
 }
 
-// Seam: 実行系境界 (add --target の追記マージ)
-// targets形式で別Targetを追記し、pullで回収できる外部挙動を検証する。
+// Seam: 実行系境界 (add --target の追記マージ・跨Target許可)
 func TestAddWithTargetMergesNewTarget(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
-		"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
+		"default_target = \"base\"\n[targets.win.\"~/.vimrc\"]\nsrc = \"dotfiles/win/.vimrc\"\n",
 	)
-	key, src, err := Add(store, "~/.vimrc", "wsl")
+	key, src, resolved, err := Add(store, "~/.vimrc", "wsl")
 	if err != nil {
 		t.Fatalf("Add(~/.vimrc, wsl) error = %v, want nil", err)
 	}
-	if key != "~/.vimrc" || src != "dotfiles/wsl/.vimrc" {
-		t.Errorf("Add = (%q, %q), want (%q, %q)", key, src, "~/.vimrc", "dotfiles/wsl/.vimrc")
+	if key != "~/.vimrc" || src != "dotfiles/wsl/.vimrc" || resolved != "wsl" {
+		t.Errorf("Add = (%q, %q, %q), want (%q, %q, %q)", key, src, resolved, "~/.vimrc", "dotfiles/wsl/.vimrc", "wsl")
 	}
 	body := readTomlForAddTest(t, store)
 	if !strings.Contains(body, "win") || !strings.Contains(body, "wsl") {
@@ -124,16 +120,16 @@ func TestAddPullCollectsAfterAdd(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
-		"[entries]\n",
+		"default_target = \"base\"\n",
 	)
 
-	if _, _, err := Add(store, "~/.vimrc", ""); err != nil {
+	if _, _, _, err := Add(store, "~/.vimrc", ""); err != nil {
 		t.Fatalf("Add error = %v, want nil", err)
 	}
 	if err := Pull(store, "", io.Discard); err != nil {
 		t.Fatalf("Pull after add error = %v, want nil", err)
 	}
-	got, err := os.ReadFile(filepath.Join(store, "dotfiles", ".vimrc"))
+	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "base", ".vimrc"))
 	if err != nil {
 		t.Fatalf("store read error after pull: %v", err)
 	}
@@ -146,11 +142,11 @@ func TestAddAcceptsAbsolutePathUnderHome(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
-		"[entries]\n",
+		"default_target = \"base\"\n",
 	)
 
 	abs := filepath.Join(home, ".vimrc")
-	key, _, err := Add(store, abs, "")
+	key, _, _, err := Add(store, abs, "")
 	if err != nil {
 		t.Fatalf("Add(%s) error = %v, want nil", abs, err)
 	}
@@ -163,30 +159,15 @@ func TestAddAcceptsAbsolutePathUnderHome(t *testing.T) {
 }
 
 func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
-	t.Run("登録済みdestは失敗し不変", func(t *testing.T) {
+	t.Run("同一キーの再登録は失敗し不変", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"dotfiles/base/.vimrc\"\n",
 		)
 		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.vimrc", ""); err == nil {
+		if _, _, _, err := Add(store, "~/.vimrc", ""); err == nil {
 			t.Fatal("Add(registered): error = nil, want non-nil")
-		}
-		if got := readTomlForAddTest(t, store); got != before {
-			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
-		}
-	})
-
-	t.Run("素のsrc済みへのtarget追加は失敗し不変", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t,
-			nil,
-			map[string]string{".vimrc": "x\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
-		)
-		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.vimrc", "win"); err == nil {
-			t.Fatal("Add(registered, win): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -197,11 +178,26 @@ func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
-			"[entries]\n\"~/.vimrc\" = { targets = { win = { src = \"dotfiles/win/.vimrc\" } } }\n",
+			"default_target = \"base\"\n[targets.win.\"~/.vimrc\"]\nsrc = \"dotfiles/win/.vimrc\"\n",
 		)
 		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.vimrc", "win"); err == nil {
+		if _, _, _, err := Add(store, "~/.vimrc", "win"); err == nil {
 			t.Fatal("Add(duplicate target): error = nil, want non-nil")
+		}
+		if got := readTomlForAddTest(t, store); got != before {
+			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
+		}
+	})
+
+	t.Run("省略時の既定欠落は失敗し不変", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			nil,
+			map[string]string{".vimrc": "x\n"},
+			"[targets.base.\"~/.other\"]\nsrc = \"dotfiles/base/.other\"\n",
+		)
+		before := readTomlForAddTest(t, store)
+		if _, _, _, err := Add(store, "~/.vimrc", ""); err == nil {
+			t.Fatal("Add without default_target: error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
 			t.Errorf("mdots.toml must be unchanged on error:\nbefore:\n%s\ngot:\n%s", before, got)
@@ -210,12 +206,12 @@ func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 
 	t.Run("Store側src既存は失敗し不変", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
-			map[string]string{"dotfiles/.vimrc": "existing\n"},
+			map[string]string{"dotfiles/base/.vimrc": "existing\n"},
 			map[string]string{".vimrc": "x\n"},
-			"[entries]\n",
+			"default_target = \"base\"\n",
 		)
 		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.vimrc", ""); err == nil {
+		if _, _, _, err := Add(store, "~/.vimrc", ""); err == nil {
 			t.Fatal("Add(existing src): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
@@ -224,9 +220,9 @@ func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("dest不在は失敗し不変", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.missing", ""); err == nil {
+		if _, _, _, err := Add(store, "~/.missing", ""); err == nil {
 			t.Fatal("Add(missing): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
@@ -235,12 +231,12 @@ func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 	})
 
 	t.Run("ディレクトリは失敗し不変", func(t *testing.T) {
-		store, home := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		store, home := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 		if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		before := readTomlForAddTest(t, store)
-		if _, _, err := Add(store, "~/.config", ""); err == nil {
+		if _, _, _, err := Add(store, "~/.config", ""); err == nil {
 			t.Fatal("Add(dir): error = nil, want non-nil")
 		}
 		if got := readTomlForAddTest(t, store); got != before {
@@ -252,14 +248,14 @@ func TestAddErrorsLeaveTomlUnchanged(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
-			"[entries]\n",
+			"default_target = \"base\"\n",
 		)
 		before := readTomlForAddTest(t, store)
 		outside := filepath.Join(t.TempDir(), "outside")
 		if err := os.WriteFile(outside, []byte("x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Add(store, outside, ""); err == nil {
+		if _, _, _, err := Add(store, outside, ""); err == nil {
 			t.Fatalf("Add(%s): error = nil, want non-nil", outside)
 		}
 		if got := readTomlForAddTest(t, store); got != before {
@@ -272,10 +268,10 @@ func TestAddPreservesCommentsAndAppends(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
-		"# my comment\n[entries]\n\"~/.bashrc\" = { src = \"dotfiles/.bashrc\" }\n",
+		"default_target = \"base\"\n# my comment\n[targets.base.\"~/.bashrc\"]\nsrc = \"dotfiles/base/.bashrc\"\n",
 	)
 	before := readTomlForAddTest(t, store)
-	if _, _, err := Add(store, "~/.vimrc", ""); err != nil {
+	if _, _, _, err := Add(store, "~/.vimrc", ""); err != nil {
 		t.Fatalf("Add error = %v, want nil", err)
 	}
 	body := readTomlForAddTest(t, store)
@@ -288,7 +284,7 @@ func TestAddPreservesCommentsAndAppends(t *testing.T) {
 	if !strings.HasPrefix(body, before) {
 		t.Errorf("existing bytes must be prefix-preserved:\nbefore:\n%s\ngot:\n%s", before, body)
 	}
-	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/.vimrc") {
+	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "dotfiles/base/.vimrc") {
 		t.Errorf("new entry must be appended, got:\n%s", body)
 	}
 }
@@ -297,7 +293,7 @@ func TestAddWithoutStoreFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	empty := t.TempDir()
-	if _, _, err := Add(empty, "~/.vimrc", ""); err == nil {
+	if _, _, _, err := Add(empty, "~/.vimrc", ""); err == nil {
 		t.Fatal("Add without Store: error = nil, want non-nil")
 	} else if !strings.Contains(err.Error(), "mdots.toml not found in "+empty) {
 		t.Errorf("error should contain not-found error, got %q", err.Error())

@@ -12,23 +12,15 @@ import (
 )
 
 // Config は Store 直下の mdots.toml 全体を表す。
-// [entries] は配置先キー化され、値は {src} か {targets} の排他いずれかである。
+// Entry は targets.<名>.<dest> のみに存在し、素の src 形式と [common] は持たない。
+// default_target は省略時の解決先を示す共有固定値である。
 type Config struct {
-	Entries map[string]EntryValue `toml:"entries"`
+	DefaultTarget string `toml:"default_target,omitempty"`
+	TargetsMap    map[string]map[string]TargetValue `toml:"targets"`
 }
 
-// EntryValue は1つの配置先に対する設定値である。
-// Src か Targets のいずれか一方のみを持つ（排他）。
-// Override は任意指定で、省略時は true として解決される。
-// Targets 形式では Target 値の override が優先され、なければ配置先直下が使われる。
-type EntryValue struct {
-	Src      *string                 `toml:"src"`
-	Override *bool                   `toml:"override"`
-	Targets  *map[string]TargetValue `toml:"targets"`
-}
-
-// TargetValue は Target キーごとの参照元である。Target はマップキー（単数文字列）。
-// Override は任意指定で、省略時は配置先直下・既定値 true に従う。
+// TargetValue は Target 内の1つの配置先に対する参照元である。
+// Src は必須、Override は任意指定で省略時は true として解決される。
 type TargetValue struct {
 	Src      *string `toml:"src"`
 	Override *bool   `toml:"override"`
@@ -43,52 +35,74 @@ type Entry struct {
 	Override bool   `toml:"override"`
 }
 
-// sortedDests は配置先キーをソート順で返す。解決・検証の順序を固定する。
-func (c Config) sortedDests() []string {
-	dests := make([]string, 0, len(c.Entries))
-	for dest := range c.Entries {
+// sortedDests は指定 Target 内の配置先キーをソート順で返す。
+func (c Config) sortedDests(target string) []string {
+	dests := make([]string, 0)
+	if c.TargetsMap == nil {
+		return dests
+	}
+	for dest := range c.TargetsMap[target] {
 		dests = append(dests, dest)
 	}
 	sort.Strings(dests)
 	return dests
 }
 
-// Resolve は指定 Target に対する解決済み Entry 群を配置先ソート順で返す.
-// 指定なし Entry は Target の有無・値に関わらず常に適用される.
-// {targets} は完全一致のみ適用され、不一致・無指定時はスキップされる.
-// "common" は普通のTargetとしてのみ一致する.
-// override は解決結果に引き継ぐのみで、選択自体には影響しない。省略時は true。
-func (c Config) Resolve(target string) []Entry {
-	dests := c.sortedDests()
-	var out []Entry
-	for _, dest := range dests {
-		v := c.Entries[dest]
-		if v.Src != nil {
-			out = append(out, Entry{Src: *v.Src, Dest: dest, Override: resolveOverride(v.Override, nil)})
-			continue
+// resolveTargetName は要求名を解決する。空文字は省略として default_target へ解決する。
+// 省略時に default_target が空・欠落ならエラー、解決先が未定義ならエラーにする。
+// 明示名が未定義ならエラーにする。いずれも Target 名と default_target/targets への hint を含む。
+func (c Config) resolveTargetName(requested string) (string, error) {
+	defined := c.Targets()
+	if requested != "" {
+		for _, name := range defined {
+			if name == requested {
+				return requested, nil
+			}
 		}
-		if v.Targets == nil {
-			continue
-		}
-		if tv, ok := (*v.Targets)[target]; ok && tv.Src != nil {
-			out = append(out, Entry{Src: *tv.Src, Dest: dest, Override: resolveOverride(v.Override, tv.Override)})
+		return "", fmt.Errorf("unknown target %q: defined targets are [%s] (hint: check --target or default_target/targets in mdots.toml)", requested, strings.Join(defined, ", "))
+	}
+	if c.DefaultTarget == "" {
+		return "", fmt.Errorf("default_target is not set (hint: set default_target or use --target; check targets in mdots.toml)")
+	}
+	for _, name := range defined {
+		if name == c.DefaultTarget {
+			return c.DefaultTarget, nil
 		}
 	}
-	return out
+	return "", fmt.Errorf("default_target %q is unknown: defined targets are [%s] (hint: check default_target/targets in mdots.toml)", c.DefaultTarget, strings.Join(defined, ", "))
 }
 
-// Targets は全Entryのtargetsキーを集約し重複排除・ソートして返す。
-// 指定なしEntryは無視し、targetsマップのキーのみを対象とする。
+// Resolve は単一 Target に対する解決済み Entry 群を配置先ソート順で返す。
+// 空文字は省略として default_target へ解決する。一度の解決で複数 Target は合成しない。
+// 重ね適用は push＋push -t wsl の二度押しで表現する。
+// 未定義名・欠落した default_target・未定義を指す default_target はエラーにする。
+func (c Config) Resolve(target string) ([]Entry, error) {
+	resolved, err := c.resolveTargetName(target)
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	for _, dest := range c.sortedDests(resolved) {
+		tv := c.TargetsMap[resolved][dest]
+		override := true
+		if tv.Override != nil {
+			override = *tv.Override
+		}
+		var src string
+		if tv.Src != nil {
+			src = *tv.Src
+		}
+		out = append(out, Entry{Src: src, Dest: dest, Override: override})
+	}
+	return out, nil
+}
+
+// Targets は定義済み Target 名を重複排除・ソートして返す。
 // 未定義時は空スライスを返す。
 func (c Config) Targets() []string {
 	seen := map[string]struct{}{}
-	for _, v := range c.Entries {
-		if v.Targets == nil {
-			continue
-		}
-		for tname := range *v.Targets {
-			seen[tname] = struct{}{}
-		}
+	for tname := range c.TargetsMap {
+		seen[tname] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
 	for tname := range seen {
@@ -98,20 +112,24 @@ func (c Config) Targets() []string {
 	return out
 }
 
-// resolveOverride は override の解決規則である。Target 値が優先され、
-// なければ配置先直下、どちらも省略時は true（上書きする＝現状維持）。
-func resolveOverride(top, inner *bool) bool {
-	if inner != nil {
-		return *inner
+// TargetsMarked は定義済み Target 名をソートし、既定 Target に印を付けて返す。
+// 印の書式は "<名> (default)" とし、テストで固定する。
+func (c Config) TargetsMarked() []string {
+	names := c.Targets()
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if name != "" && name == c.DefaultTarget {
+			out = append(out, name+" (default)")
+			continue
+		}
+		out = append(out, name)
 	}
-	if top != nil {
-		return *top
-	}
-	return true
+	return out
 }
 
 // Load は Store の mdots.toml を読み込み、validation して返す。
 // 未知フィールドは一律 unknown field で拒否し、型不正は Decode エラーに任せる。
+// default_target の欠落・空文字はここでは許容し、解決時にエラーにする。
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -122,11 +140,11 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if err := rejectUnexpectedFormat(md, cfg); err != nil {
+	if err := rejectUnexpectedFormat(md); err != nil {
 		return Config{}, err
 	}
-	if cfg.Entries == nil {
-		cfg.Entries = map[string]EntryValue{}
+	if cfg.TargetsMap == nil {
+		cfg.TargetsMap = map[string]map[string]TargetValue{}
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -137,61 +155,39 @@ func Load(path string) (Config, error) {
 // rejectUnexpectedFormat は想定外フォーマットを一律拒否する。
 // 未知フィールドは unknown field で拒否する。
 // BurntSushi/toml は map への非テーブル代入を黙って空にするため、
-// entries と targets のテーブル型はここで明示的に拒否する。
+// targets のテーブル型はここで明示的に拒否する。
 // ドットヘッダで暗黙生成された親テーブルは Type が "" になるため許容する。
-func rejectUnexpectedFormat(md toml.MetaData, cfg Config) error {
+func rejectUnexpectedFormat(md toml.MetaData) error {
 	if undecoded := md.Undecoded(); len(undecoded) > 0 {
 		return fmt.Errorf("unknown field %q", undecoded[0].String())
 	}
-	if md.IsDefined("entries") {
-		if typ := md.Type("entries"); typ != "Hash" && typ != "" {
-			return fmt.Errorf("entries: table expected")
-		}
-	}
-	for dest := range cfg.Entries {
-		if md.IsDefined("entries", dest, "targets") {
-			if typ := md.Type("entries", dest, "targets"); typ != "Hash" && typ != "" {
-				return fmt.Errorf("entries[%q]: targets must be a table", dest)
-			}
+	if md.IsDefined("targets") {
+		if typ := md.Type("targets"); typ != "Hash" && typ != "" {
+			return fmt.Errorf("targets: table expected")
 		}
 	}
 	return nil
 }
 
-// Validate は配置先キー・{src}/{targets} 排他・空を検証する。
-// 重複TargetはTOMLキー重複として構造上不可能なため検証しない。
+// Validate は Target 名・配置先キー・src 必須・空を検証する。
+// 同一 Target 内の同一 dest 重複は TOML キー重複として構造上不可能なため検証しない。
+// 同一 dest の跨 Target 定義は許可する。default_target の欠落・空は解決時に扱いここでは許容する。
 func (c Config) Validate() error {
-	dests := c.sortedDests()
-	for _, dest := range dests {
-		v := c.Entries[dest]
-		if dest == "" {
-			return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+	for _, tname := range sortedKeys(c.TargetsMap) {
+		if tname == "" {
+			return fmt.Errorf("targets[%q]: target must not be empty", tname)
 		}
-		hasSrc := v.Src != nil
-		hasTargets := v.Targets != nil
-		if hasSrc && hasTargets {
-			return fmt.Errorf("entries[%q]: src and targets are mutually exclusive", dest)
-		}
-		if !hasSrc && !hasTargets {
-			return fmt.Errorf("entries[%q]: either src or targets is required", dest)
-		}
-		if hasSrc {
-			if *v.Src == "" {
-				return fmt.Errorf("entries[%q]: src is required", dest)
-			}
+		dests := c.TargetsMap[tname]
+		if dests == nil {
 			continue
 		}
-		targets := *v.Targets
-		if len(targets) == 0 {
-			return fmt.Errorf("entries[%q]: targets must not be empty", dest)
-		}
-		for _, tname := range sortedKeys(targets) {
-			tv := targets[tname]
-			if tname == "" {
-				return fmt.Errorf("entries[%q]: target must not be empty", dest)
+		for _, dest := range sortedKeys(dests) {
+			tv := dests[dest]
+			if dest == "" {
+				return fmt.Errorf("targets[%q][%q]: dest must not be empty", tname, dest)
 			}
 			if tv.Src == nil || *tv.Src == "" {
-				return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, tname)
+				return fmt.Errorf("targets[%q][%q]: src is required", tname, dest)
 			}
 		}
 	}
@@ -228,21 +224,10 @@ func (e Entry) ExpandedDest() (string, error) {
 }
 
 // Template は init が作る mdots.toml 雛形である。
-// サンプルはすべてコメントアウト済み。
+// default_target = "base" のみを持ち、コメント・例示は含まない。
+// base は予約語ではなく初期値例である。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
-// 記法は add の Save と同じテーブル形式に寄せる（インライン形式は使わない）。
-const Template = `# [entries."~/.vimrc"]
-# src = "dotfiles/.vimrc"
-#
-# [entries."~/.bashrc"]
-# src = "dotfiles/.bashrc"
-# override = false
-#
-# [entries."~/.gitconfig".targets.win]
-# src = "dotfiles/win/.gitconfig"
-# [entries."~/.gitconfig".targets.wsl]
-# src = "dotfiles/wsl/.gitconfig"
-# override = false
+const Template = `default_target = "base"
 `
 
 // Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。
@@ -313,28 +298,12 @@ func NormalizeDest(raw string) (string, error) {
 	return "", fmt.Errorf("dest must be ~/... or under HOME: %q", raw)
 }
 
-// SrcForDest は正規化済み dest から Store 相対の src を算出する。
-// ~/ を除去し dotfiles/ を付ける。~ 自体は dotfiles に写像する。
-func SrcForDest(normalizedDest string) (string, error) {
-	if normalizedDest == "~" {
-		return "dotfiles", nil
-	}
-	if strings.HasPrefix(normalizedDest, "~/") {
-		rest := normalizedDest[2:]
-		if rest == "" {
-			return "dotfiles", nil
-		}
-		return "dotfiles/" + rest, nil
-	}
-	return "", fmt.Errorf("dest must be ~/...: %q", normalizedDest)
-}
-
 // SrcForDestWithTarget は正規化済み dest と Target から Store 相対の src を算出する。
-// target 空時は SrcForDest と同じ。target 指定時は dotfiles/<target>/... に写像する。
-// ~ 自体は dotfiles/<target> に写像する。
+// dotfiles/<target>/... に写像する。~ 自体は dotfiles/<target> に写像する。
+// target 空時はエラーを返す（無指定 plain 登録は廃止）。
 func SrcForDestWithTarget(normalizedDest, target string) (string, error) {
 	if target == "" {
-		return SrcForDest(normalizedDest)
+		return "", fmt.Errorf("targets[%q]: target must not be empty", target)
 	}
 	if normalizedDest == "~" {
 		return "dotfiles/" + target, nil
@@ -349,109 +318,73 @@ func SrcForDestWithTarget(normalizedDest, target string) (string, error) {
 	return "", fmt.Errorf("dest must be ~/...: %q", normalizedDest)
 }
 
-// Add は未登録の配置先を素の src 形式で新規 Entry として登録する。
-// 既存 dest はエラーを返し、override は書かない（省略時 true として解決される）。
-func (c *Config) Add(dest, src string) error {
-	if dest == "" {
-		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
-	}
-	if src == "" {
-		return fmt.Errorf("entries[%q]: src is required", dest)
-	}
-	if c.Entries == nil {
-		c.Entries = map[string]EntryValue{}
-	}
-	if _, ok := c.Entries[dest]; ok {
-		return fmt.Errorf("entries[%q]: already registered", dest)
-	}
-	s := src
-	c.Entries[dest] = EntryValue{Src: &s}
-	return nil
-}
-
 // AddTarget は配置先を targets 形式で登録する。
-// dest 未登録なら新規 Entry を作り、targets 形式で登録済みかつ指定 Target が
-// 未登録なら追記マージする。素の src 形式で登録済み、または同一 Target が
-// 登録済みならエラーを返す。
+// 指定 Target 内の同一 dest が登録済みならエラーを返す。
+// 同一 dest の跨 Target 定義は許可する。
 // override は書かない（省略時 true として解決される）。
 func (c *Config) AddTarget(dest, target, src string) error {
 	if dest == "" {
-		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+		return fmt.Errorf("targets[%q][%q]: dest must not be empty", target, dest)
 	}
 	if target == "" {
-		return fmt.Errorf("entries[%q]: target must not be empty", dest)
+		return fmt.Errorf("targets[%q]: target must not be empty", target)
 	}
 	if src == "" {
-		return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, target)
+		return fmt.Errorf("targets[%q][%q]: src is required", target, dest)
 	}
-	if c.Entries == nil {
-		c.Entries = map[string]EntryValue{}
+	if c.TargetsMap == nil {
+		c.TargetsMap = map[string]map[string]TargetValue{}
 	}
 	s := src
-	if existing, ok := c.Entries[dest]; ok {
-		if existing.Src != nil || existing.Targets == nil {
-			return fmt.Errorf("entries[%q]: already registered", dest)
+	if dests, ok := c.TargetsMap[target]; ok {
+		if _, ok := dests[dest]; ok {
+			return fmt.Errorf("targets[%q][%q]: already registered", target, dest)
 		}
-		if _, ok := (*existing.Targets)[target]; ok {
-			return fmt.Errorf("entries[%q]: already registered", dest)
+		merged := make(map[string]TargetValue, len(dests)+1)
+		for d, tv := range dests {
+			merged[d] = tv
 		}
-		merged := make(map[string]TargetValue, len(*existing.Targets)+1)
-		for name, tv := range *existing.Targets {
-			merged[name] = tv
-		}
-		merged[target] = TargetValue{Src: &s}
-		c.Entries[dest] = EntryValue{Targets: &merged}
+		merged[dest] = TargetValue{Src: &s}
+		c.TargetsMap[target] = merged
 		return nil
 	}
-	c.Entries[dest] = EntryValue{Targets: &map[string]TargetValue{target: {Src: &s}}}
+	c.TargetsMap[target] = map[string]TargetValue{dest: {Src: &s}}
 	return nil
-}
-
-// AppendPlainEntry は素のsrc形式の1 Entry分fragmentを生成し、
-// 元ファイルに空行1行で区切って追記した完成形を再Loadして問題なければatomicに置換する。
-// 既存バイトは追記以外温存する。失敗時は元ファイルを不変に保つ。
-func AppendPlainEntry(path, dest, src string) error {
-	if dest == "" {
-		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
-	}
-	if src == "" {
-		return fmt.Errorf("entries[%q]: src is required", dest)
-	}
-	srcCopy := src
-	return appendSingleEntry(path, dest, EntryValue{Src: &srcCopy})
 }
 
 // AppendTargetEntry はtargets形式の新規1 Target分fragmentを生成し、
 // 元ファイルに空行1行で区切って追記した完成形を再Loadして問題なければatomicに置換する。
 // 新規dest・既存destへのTarget追記のいずれも末尾追記で統一する。
+// 同一 Target 内の同一 dest 重複は再Loadで拒否し、跨 Target の同一 dest は許可する。
 // 失敗時は元ファイルを不変に保つ。
 func AppendTargetEntry(path, dest, target, src string) error {
 	if dest == "" {
-		return fmt.Errorf("entries[%q]: dest must not be empty", dest)
+		return fmt.Errorf("targets[%q][%q]: dest must not be empty", target, dest)
 	}
 	if target == "" {
-		return fmt.Errorf("entries[%q]: target must not be empty", dest)
+		return fmt.Errorf("targets[%q]: target must not be empty", target)
 	}
 	if src == "" {
-		return fmt.Errorf("entries[%q].targets[%q]: src is required", dest, target)
+		return fmt.Errorf("targets[%q][%q]: src is required", target, dest)
 	}
 	srcCopy := src
-	entry := EntryValue{Targets: &map[string]TargetValue{target: {Src: &srcCopy}}}
-	return appendSingleEntry(path, dest, entry)
+	entry := map[string]map[string]TargetValue{target: {dest: {Src: &srcCopy}}}
+	return appendSingleEntry(path, entry)
 }
 
 // appendSingleEntry は1 Entry分のfragment化と追記＋検証＋置換を一本化する。
-func appendSingleEntry(path, dest string, entry EntryValue) error {
-	fragment, err := encodeSingleEntry(dest, entry)
+func appendSingleEntry(path string, entry map[string]map[string]TargetValue) error {
+	fragment, err := encodeSingleEntry(entry)
 	if err != nil {
 		return err
 	}
 	return appendFragmentAtomic(path, fragment)
 }
 
-// encodeSingleEntry は1 EntryだけのConfigを Save と同じテーブル形式でfragment化する。
-func encodeSingleEntry(dest string, entry EntryValue) (string, error) {
-	singleConfig := Config{Entries: map[string]EntryValue{dest: entry}}
+// encodeSingleEntry は1 Target分だけのConfigを Save と同じテーブル形式でfragment化する。
+// default_target は含めない（追記先の既存値を温存する）。
+func encodeSingleEntry(entry map[string]map[string]TargetValue) (string, error) {
+	singleConfig := Config{TargetsMap: entry}
 	if err := singleConfig.Validate(); err != nil {
 		return "", err
 	}
@@ -527,6 +460,7 @@ func appendFragmentAtomic(path, fragment string) error {
 // stripEmptyTableHeaders は値行を持たないテーブルヘッダ行を取り除く。
 // ヘッダ行の直後が次のヘッダ行または末尾の場合、そのヘッダは空とみなす。
 // キー行が1つでも続くヘッダは残す（例: override を持つ親テーブル）。
+// default_target 行は値行として扱い、直前の空ヘッダ判定に影響させない。
 func stripEmptyTableHeaders(out string) string {
 	lines := strings.Split(out, "\n")
 	var kept []string

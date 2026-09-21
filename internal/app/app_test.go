@@ -39,13 +39,11 @@ func setupStoreWithHome(t *testing.T, storeFiles, homeFiles map[string]string, t
 }
 
 // Seam: 実行系境界 (override=false の skip 警告)
-// 結合では exit・保護のみを見て文面は未検証のため、注入先 stderr への
-// 1行出力をここで押さえる。文面は CONTEXT.md の override 用語に従う。
 func TestPushOverrideSkippedWarnsToStderr(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "new\n"},
 		map[string]string{".vimrc": "old\n"},
-		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\", override = false }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
 	var errOut bytes.Buffer
