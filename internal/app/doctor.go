@@ -1,7 +1,7 @@
 // doctor は sharable 検出のみを行う。
 //
-// 検出条件は同一 dest × 別 src × Store 上の内容一致とする。
-// dest 違いの内容一致と既に同一 src のものは対象外、比較は Store 上の
+// 検出条件は Store 上の別 src 間の内容一致のみとする。
+// dest の異同は問わず、既に同一 src のものは対象外、比較は Store 上の
 // src 同士のみで HOME と override・モードの異同は無視する。
 // 部分一致は内容ハッシュでグループ化して報告する。
 // 欠落ファイルは skip し、ディレクトリ・読み込み失敗はエラーとする。
@@ -24,12 +24,12 @@ import (
 // doctorRef は sharable 候補を構成する1つの参照元である。
 type doctorRef struct {
 	target string
+	dest   string
 	src    string
 }
 
-// doctorGroup は同一 dest・同一内容で共有化候補となる一群である。
+// doctorGroup は同一内容で共有化候補となる一群である。
 type doctorGroup struct {
-	dest string
 	refs []doctorRef
 }
 
@@ -58,62 +58,48 @@ func Doctor(cwd string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	for _, g := range groups {
-		fmt.Fprintf(stdout, "sharable: %s\n", g.dest)
+		fmt.Fprintln(stdout, "sharable:")
 		for _, r := range g.refs {
-			fmt.Fprintf(stdout, "  %s (target: %s)\n", r.src, r.target)
+			fmt.Fprintf(stdout, "  %s (target: %s, dest: %s)\n", r.src, r.target, r.dest)
 		}
 	}
 	return 1
 }
 
-// findSharable は同一 dest ごとに別 src 間の内容一致を集める。
-// dest・グループ・参照の順序はソートして決定的にする。
+// findSharable は Store 全体で別 src 間の内容一致を集める。
+// グループ・参照の順序はソートして決定的にする。
 func findSharable(store string, cfg config.Config) ([]doctorGroup, error) {
-	byDest := map[string][]doctorRef{}
+	var refs []doctorRef
 	for target, dests := range cfg.TargetsMap {
 		for dest, tv := range dests {
 			var src string
 			if tv.Src != nil {
 				src = *tv.Src
 			}
-			byDest[dest] = append(byDest[dest], doctorRef{target: target, src: src})
+			refs = append(refs, doctorRef{target: target, dest: dest, src: src})
 		}
 	}
-	dests := make([]string, 0, len(byDest))
-	for dest := range byDest {
-		dests = append(dests, dest)
-	}
-	sort.Strings(dests)
-
-	var out []doctorGroup
-	for _, dest := range dests {
-		groups, err := sharableForDest(store, dest, byDest[dest])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, groups...)
-	}
-	return out, nil
+	return sharableForRefs(store, refs)
 }
 
-// sharableForDest は1つの dest に対する候補群を返す。
+// sharableForRefs は参照群に対する候補群を返す。
 // 同一 src は1つに束ねて対象外とし、欠落は skip する。
-func sharableForDest(store, dest string, refs []doctorRef) ([]doctorGroup, error) {
-	srcToTarget := map[string]string{}
+func sharableForRefs(store string, refs []doctorRef) ([]doctorGroup, error) {
+	srcToRef := map[string]doctorRef{}
 	for _, r := range refs {
-		if prev, ok := srcToTarget[r.src]; ok {
-			if r.target < prev {
-				srcToTarget[r.src] = r.target
+		if prev, ok := srcToRef[r.src]; ok {
+			if r.target < prev.target || (r.target == prev.target && r.dest < prev.dest) {
+				srcToRef[r.src] = r
 			}
 			continue
 		}
-		srcToTarget[r.src] = r.target
+		srcToRef[r.src] = r
 	}
-	if len(srcToTarget) < 2 {
+	if len(srcToRef) < 2 {
 		return nil, nil
 	}
-	srcs := make([]string, 0, len(srcToTarget))
-	for src := range srcToTarget {
+	srcs := make([]string, 0, len(srcToRef))
+	for src := range srcToRef {
 		srcs = append(srcs, src)
 	}
 	sort.Strings(srcs)
@@ -137,7 +123,7 @@ func sharableForDest(store, dest string, refs []doctorRef) ([]doctorGroup, error
 		}
 		sum := sha256.Sum256(data)
 		hash := hex.EncodeToString(sum[:])
-		byHash[hash] = append(byHash[hash], doctorRef{target: srcToTarget[src], src: src})
+		byHash[hash] = append(byHash[hash], srcToRef[src])
 	}
 
 	hashes := make([]string, 0, len(byHash))
@@ -156,9 +142,12 @@ func sharableForDest(store, dest string, refs []doctorRef) ([]doctorGroup, error
 			if refs[i].src != refs[j].src {
 				return refs[i].src < refs[j].src
 			}
-			return refs[i].target < refs[j].target
+			if refs[i].target != refs[j].target {
+				return refs[i].target < refs[j].target
+			}
+			return refs[i].dest < refs[j].dest
 		})
-		groups = append(groups, doctorGroup{dest: dest, refs: refs})
+		groups = append(groups, doctorGroup{refs: refs})
 	}
 	// ハッシュ順は内容依存で非決定的に見えるため、出力順は先頭srcで整える。
 	sort.Slice(groups, func(i, j int) bool {
