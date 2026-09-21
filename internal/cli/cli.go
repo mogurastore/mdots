@@ -256,15 +256,11 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 	}
 	dest := args.First()
 	target := cmd.String("target")
-	key, src, err := app.Add(r.cwd, dest, target)
+	key, src, resolved, err := app.Add(r.cwd, dest, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
-	if target == "" {
-		fmt.Fprintf(r.stdout, "added %s (src: %s)\n", key, src)
-		return nil
-	}
-	fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", key, target, src)
+	fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", key, resolved, src)
 	return nil
 }

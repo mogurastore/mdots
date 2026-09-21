@@ -15,71 +15,71 @@ import (
 )
 
 // Add は未登録の既存ファイルを新規Entryとして登録する。
-// Store発見（カレント直下のみ）→dest正規化→src算出→Load→意味検査→
+// Store発見（カレント直下のみ）→dest正規化→Target解決→src算出→Load→意味検査→
 // fragment生成→元ファイル追記→完成形再Load→atomic置換の順に行い、
 // ファイルのコピーは行わない。回収は pull が行う。
-// target 指定時は dotfiles/<target>/... に写像し、targets形式で登録する。
+// target 省略時は default_target へ登録し、明示時は指定 Target へ登録する。
+// 省略時に default_target が空・欠落ならエラーにする（未定義を指す場合も新規作成として許容する）。
+// 同一 Target 内の同一 dest 再登録はエラー、跨 Target の同一 dest は追記を許す。
 // いずれかの検証で失敗したときは登録せず、mdots.tomlを変更しない。
-// 素のsrc済み・同一Targetの再登録はエラーとする。
-// targets形式で別Targetが未登録なら追記マージする。
-func Add(cwd, rawDest, target string) (string, string, error) {
+// override は書かない（省略時 true として解決される）。
+// 戻り値は配置先キー・Store相対src・解決先Targetである。
+func Add(cwd, rawDest, target string) (string, string, string, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	key, err := config.NormalizeDest(rawDest)
 	if err != nil {
-		return "", "", err
-	}
-	src, err := config.SrcForDestWithTarget(key, target)
-	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
+	}
+	resolved := target
+	if resolved == "" {
+		if cfg.DefaultTarget == "" {
+			return "", "", "", fmt.Errorf("default_target is not set (hint: set default_target or use --target; check targets in mdots.toml)")
+		}
+		resolved = cfg.DefaultTarget
+	}
+	src, err := config.SrcForDestWithTarget(key, resolved)
+	if err != nil {
+		return "", "", "", err
 	}
 	destPath, err := config.ExpandDest(key)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	destInfo, destErr := os.Stat(destPath)
 	if destErr != nil {
-		return "", "", fmt.Errorf("add %s: %w", key, destErr)
+		return "", "", "", fmt.Errorf("add %s: %w", key, destErr)
 	}
 	if destInfo.IsDir() {
-		return "", "", fmt.Errorf("add %s: dest is a directory: %s", key, destPath)
+		return "", "", "", fmt.Errorf("add %s: dest is a directory: %s", key, destPath)
 	}
 	srcPath := filepath.Join(store, src)
 	if srcInfo, srcErr := os.Stat(srcPath); srcErr == nil {
 		if srcInfo.IsDir() {
-			return "", "", fmt.Errorf("add %s: src is a directory: %s", key, src)
+			return "", "", "", fmt.Errorf("add %s: src is a directory: %s", key, src)
 		}
-		return "", "", fmt.Errorf("add %s: src already exists in Store: %s", key, src)
+		return "", "", "", fmt.Errorf("add %s: src already exists in Store: %s", key, src)
 	} else if !os.IsNotExist(srcErr) {
-		return "", "", fmt.Errorf("add %s: %w", key, srcErr)
+		return "", "", "", fmt.Errorf("add %s: %w", key, srcErr)
 	}
-	if target == "" {
-		if err := cfg.Add(key, src); err != nil {
-			return "", "", err
-		}
-		if err := config.AppendPlainEntry(filepath.Join(store, "mdots.toml"), key, src); err != nil {
-			return "", "", err
-		}
-	} else {
-		if err := cfg.AddTarget(key, target, src); err != nil {
-			return "", "", err
-		}
-		if err := config.AppendTargetEntry(filepath.Join(store, "mdots.toml"), key, target, src); err != nil {
-			return "", "", err
-		}
+	if err := cfg.AddTarget(key, resolved, src); err != nil {
+		return "", "", "", err
 	}
-	return key, src, nil
+	if err := config.AppendTargetEntry(filepath.Join(store, "mdots.toml"), key, resolved, src); err != nil {
+		return "", "", "", err
+	}
+	return key, src, resolved, nil
 }
 
 // resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、
-// push/pull で共有する。解決規則は config.Resolve に寄せる
-// （指定なしは常時＋一致Targetのみ、配置先ソート順）。
+// push/pull で共有する。解決は単一 Target のみで、省略時は default_target へ解決する
+// （配置先ソート順）。未定義名・欠落した default_target はエラーにする。
 func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -89,7 +89,11 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return store, cfg.Resolve(target), nil
+	entries, err := cfg.Resolve(target)
+	if err != nil {
+		return "", nil, err
+	}
+	return store, entries, nil
 }
 
 // reportSkipped は override=false による skip を警告として報告する。
@@ -117,8 +121,8 @@ func runCopy(cwd string, target string, op string, stderr io.Writer, copyFn func
 	return nil
 }
 
-// Push は指定なし＋指定Target の Entry を Store から dest へコピーする。
-// target 未指定時は指定なし Entry のみが対象になる。
+// Push は単一 Target の Entry を Store から dest へコピーする。
+// target 省略時は default_target へ解決する。未定義名・欠落した default_target はエラーにする。
 // override=false の既存 dest は保護して skip 継続し、警告を stderr に出す。
 func Push(cwd string, target string, stderr io.Writer) error {
 	return runCopy(cwd, target, "push", stderr, sync.Push)
@@ -131,8 +135,8 @@ func Init(cwd string) error {
 	return err
 }
 
-// Targets は定義済みTarget名を重複排除・ソートして返す。
-// Store不在・toml不正時はエラーを返す。
+// Targets は定義済みTarget名を重複排除・ソートし、既定 Target に印を付けて返す。
+// 印の書式は "<名> (default)" とする。Store不在・toml不正時はエラーを返す。
 func Targets(cwd string) ([]string, error) {
 	store, err := config.FindStore(cwd)
 	if err != nil {
@@ -142,11 +146,11 @@ func Targets(cwd string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cfg.Targets(), nil
+	return cfg.TargetsMarked(), nil
 }
 
-// Pull は指定なし＋指定Target の Entry を dest から Store へ回収する。
-// target 未指定時は指定なし Entry のみが対象になる。
+// Pull は単一 Target の Entry を dest から Store へ回収する。
+// target 省略時は default_target へ解決する。未定義名・欠落した default_target はエラーにする。
 // override=false の既存 Store は保護して skip 継続し、警告を stderr に出す。
 func Pull(cwd string, target string, stderr io.Writer) error {
 	return runCopy(cwd, target, "pull", stderr, sync.Pull)
@@ -163,7 +167,7 @@ func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 }
 
 // PushDryRun は push の差分を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
+// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
 func PushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
@@ -179,7 +183,7 @@ func PushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int 
 }
 
 // PullDryRun は pull の差分を stdout に出し、書き込みは行わない。
-// 差分ありは exit 1、差分なしは exit 0。
+// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
 func PullDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {

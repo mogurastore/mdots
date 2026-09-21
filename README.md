@@ -46,17 +46,15 @@ mdots pull --dry-run
 ## 設定例（mdots.toml）
 
 ```toml
-[entries."~/.vimrc"]
-src = "dotfiles/.vimrc"
+default_target = "base"
 
-[entries."~/.bashrc"]
-src = "dotfiles/.bashrc"
+[targets.base."~/.vimrc"]
+src = "dotfiles/base/.vimrc"
+
+[targets.base."~/.bashrc"]
+src = "dotfiles/base/.bashrc"
 override = false
 
-[entries."~/.gitconfig".targets.win]
-src = "dotfiles/win/.gitconfig"
-
-[entries."~/.gitconfig".targets.wsl]
+[targets.wsl."~/.gitconfig"]
 src = "dotfiles/wsl/.gitconfig"
-override = false
 ```

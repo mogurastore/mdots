@@ -54,6 +54,16 @@ func runCliEmpty(t *testing.T, args []string) (int, string, string) {
 	return runCli(t, t.TempDir(), args)
 }
 
+func baseWinToml() string {
+	return "default_target = \"base\"\n" +
+		"[targets.base.\"~/.base.conf\"]\nsrc = \"base.conf\"\n" +
+		"[targets.win.\"~/.win.conf\"]\nsrc = \"win.conf\"\n"
+}
+
+func singleBaseToml() string {
+	return "default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n"
+}
+
 func TestCliGlobalHelp(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"-h"}} {
 		code, out, _ := runCliEmpty(t, args)
@@ -149,11 +159,9 @@ func TestCliDiffIsRemoved(t *testing.T) {
 func TestCliDryRunDispatchesTarget(t *testing.T) {
 	newWinStore := func(t *testing.T) (string, string) {
 		return setupStoreWithHome(t,
-			map[string]string{"common.conf": "same\n", "win.conf": "new\n"},
-			map[string]string{".common.conf": "same\n", ".win.conf": "old\n"},
-			"[entries]\n"+
-				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
-				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+			map[string]string{"base.conf": "same\n", "win.conf": "new\n"},
+			map[string]string{".base.conf": "same\n", ".win.conf": "old\n"},
+			baseWinToml(),
 		)
 	}
 	t.Run("push", func(t *testing.T) {
@@ -162,7 +170,7 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 			args []string
 			want string
 		}{
-			{"no target", []string{"push", "--dry-run"}, ""},
+			{"no target resolves to default", []string{"push", "--dry-run"}, ""},
 			{"space form", []string{"push", "--dry-run", "--target", "win"}, "win"},
 			{"equals form", []string{"push", "--dry-run", "--target=win"}, "win"},
 		}
@@ -185,7 +193,7 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 				if !strings.Contains(out, "win.conf") {
 					t.Errorf("Run(%v): output should contain win diff, got %q", tt.args, out)
 				}
-				if strings.Contains(out, "common.conf") {
+				if strings.Contains(out, "base.conf") {
 					t.Errorf("Run(%v): must not contain diff-free entry, got %q", tt.args, out)
 				}
 			})
@@ -197,18 +205,16 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 			args []string
 			want string
 		}{
-			{"no target", []string{"pull", "--dry-run"}, ""},
+			{"no target resolves to default", []string{"pull", "--dry-run"}, ""},
 			{"space form", []string{"pull", "--dry-run", "--target", "win"}, "win"},
 			{"equals form", []string{"pull", "--dry-run", "--target=win"}, "win"},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				store, _ := setupStoreWithHome(t,
-					map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
-					map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
-					"[entries]\n"+
-						`"~/.common.conf" = { src = "common.conf" }`+"\n"+
-						`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+					map[string]string{"base.conf": "same\n", "win.conf": "old\n"},
+					map[string]string{".base.conf": "same\n", ".win.conf": "new\n"},
+					baseWinToml(),
 				)
 				code, out, _ := runCli(t, store, tt.args)
 				if tt.want == "" {
@@ -226,6 +232,18 @@ func TestCliDryRunDispatchesTarget(t *testing.T) {
 			})
 		}
 	})
+	t.Run("unknown target errors with hint", func(t *testing.T) {
+		store, _ := newWinStore(t)
+		code, _, errOut := runCli(t, store, []string{"push", "--dry-run", "--target", "linux"})
+		if code == 0 {
+			t.Fatal("unknown target: exit = 0, want non-zero")
+		}
+		for _, want := range []string{"linux", "default_target", "targets"} {
+			if !strings.Contains(errOut, want) {
+				t.Errorf("stderr should contain %q, got %q", want, errOut)
+			}
+		}
+	})
 }
 
 func TestCliColorRequiresDryRun(t *testing.T) {
@@ -236,7 +254,7 @@ func TestCliColorRequiresDryRun(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, _, errOut := runCli(t, store, args)
 		if code == 0 {
@@ -314,19 +332,17 @@ func TestCliCommandHelp(t *testing.T) {
 }
 
 func TestCliPushDispatchesTarget(t *testing.T) {
-	entriesToml := "[entries]\n" +
-		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
-	storeFiles := map[string]string{"common.conf": "common\n", "win.conf": "win\n"}
+	entriesToml := baseWinToml()
+	storeFiles := map[string]string{"base.conf": "base\n", "win.conf": "win\n"}
 	tests := []struct {
 		name string
 		args []string
 		want []string
 		skip []string
 	}{
-		{"no target", []string{"push"}, []string{".common.conf"}, []string{".win.conf"}},
-		{"space form", []string{"push", "--target", "win"}, []string{".common.conf", ".win.conf"}, nil},
-		{"equals form", []string{"push", "--target=win"}, []string{".common.conf", ".win.conf"}, nil},
+		{"no target resolves to default", []string{"push"}, []string{".base.conf"}, []string{".win.conf"}},
+		{"space form", []string{"push", "--target", "win"}, []string{".win.conf"}, []string{".base.conf"}},
+		{"equals form", []string{"push", "--target=win"}, []string{".win.conf"}, []string{".base.conf"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -347,50 +363,60 @@ func TestCliPushDispatchesTarget(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unknown target errors", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+		code, _, errOut := runCli(t, store, []string{"push", "--target", "linux"})
+		if code == 0 {
+			t.Fatal("unknown target: exit = 0, want non-zero")
+		}
+		for _, want := range []string{"linux", "default_target", "targets"} {
+			if !strings.Contains(errOut, want) {
+				t.Errorf("stderr should contain %q, got %q", want, errOut)
+			}
+		}
+	})
 }
 
 func TestCliShortFlags(t *testing.T) {
 	t.Run("push -t は --target と同じ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t,
-			map[string]string{"common.conf": "common\n", "win.conf": "win\n"},
+			map[string]string{"base.conf": "base\n", "win.conf": "win\n"},
 			nil,
-			"[entries]\n"+
-				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
-				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+			baseWinToml(),
 		)
 		code, _, errOut := runCli(t, store, []string{"push", "-t", "win"})
 		if code != 0 {
 			t.Fatalf("Run(push -t win) exit = %d, want 0 (stderr=%q)", code, errOut)
 		}
-		for _, f := range []string{".common.conf", ".win.conf"} {
-			if _, err := os.Stat(filepath.Join(home, f)); err != nil {
-				t.Errorf("%s should be copied: %v", f, err)
-			}
+		if _, err := os.Stat(filepath.Join(home, ".win.conf")); err != nil {
+			t.Errorf(".win.conf should be copied: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".base.conf")); err == nil {
+			t.Error(".base.conf should NOT be copied with -t win (single-target)")
 		}
 	})
 	t.Run("pull -t は --target と同じ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
-			map[string]string{".common.conf": "common\n", ".win.conf": "win\n"},
-			"[entries]\n"+
-				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
-				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+			map[string]string{".base.conf": "base\n", ".win.conf": "win\n"},
+			baseWinToml(),
 		)
 		code, _, errOut := runCli(t, store, []string{"pull", "-t", "win"})
 		if code != 0 {
 			t.Fatalf("Run(pull -t win) exit = %d, want 0 (stderr=%q)", code, errOut)
 		}
-		for _, f := range []string{"common.conf", "win.conf"} {
-			if _, err := os.Stat(filepath.Join(store, f)); err != nil {
-				t.Errorf("%s should be pulled: %v", f, err)
-			}
+		if _, err := os.Stat(filepath.Join(store, "win.conf")); err != nil {
+			t.Errorf("win.conf should be pulled: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(store, "base.conf")); err == nil {
+			t.Error("base.conf should NOT be pulled with -t win")
 		}
 	})
 	t.Run("push -n は --dry-run と同じ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "new\n"},
 			map[string]string{".vimrc": "old\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, out, _ := runCli(t, store, []string{"push", "-n"})
 		if code == 0 {
@@ -402,11 +428,9 @@ func TestCliShortFlags(t *testing.T) {
 	})
 	t.Run("pull -n -t の併用", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
-			map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
-			map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
-			"[entries]\n"+
-				`"~/.common.conf" = { src = "common.conf" }`+"\n"+
-				`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }`+"\n",
+			map[string]string{"base.conf": "same\n", "win.conf": "old\n"},
+			map[string]string{".base.conf": "same\n", ".win.conf": "new\n"},
+			baseWinToml(),
 		)
 		code, out, _ := runCli(t, store, []string{"pull", "-n", "-t", "win"})
 		if code == 0 {
@@ -420,7 +444,7 @@ func TestCliShortFlags(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, out, _ := runCli(t, store, []string{"push", "-n", "-c", "always"})
 		if code != 0 {
@@ -434,7 +458,7 @@ func TestCliShortFlags(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, _, errOut := runCli(t, store, []string{"push", "-c", "always"})
 		if code == 0 {
@@ -470,7 +494,7 @@ func TestCliDryRunDelegatesExitCode(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "new\n"},
 			map[string]string{".vimrc": "old\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, out, _ := runCli(t, store, []string{"push", "--dry-run"})
 		if code != 1 {
@@ -486,7 +510,7 @@ func TestCliDryRunDelegatesExitCode(t *testing.T) {
 		store, _ = setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		if code, out, _ := runCli(t, store, []string{"push", "--dry-run"}); code != 0 {
 			t.Errorf("Run(push --dry-run) without changes: exit = %d, want 0", code)
@@ -498,7 +522,7 @@ func TestCliDryRunDelegatesExitCode(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "old\n"},
 			map[string]string{".vimrc": "new\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		code, out, _ := runCli(t, store, []string{"pull", "--dry-run"})
 		if code != 1 {
@@ -511,7 +535,7 @@ func TestCliDryRunDelegatesExitCode(t *testing.T) {
 		store, _ = setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			singleBaseToml(),
 		)
 		if code, _, _ := runCli(t, store, []string{"pull", "--dry-run"}); code != 0 {
 			t.Errorf("Run(pull --dry-run) without changes: exit = %d, want 0", code)
@@ -525,7 +549,7 @@ func TestCliDryRunColorFlag(t *testing.T) {
 			store, _ := setupStoreWithHome(t,
 				map[string]string{"vimrc": "same\n"},
 				map[string]string{".vimrc": "same\n"},
-				"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+				singleBaseToml(),
 			)
 			if code, out, _ := runCli(t, store, args); code != 0 {
 				t.Fatalf("Run(%v) exit = %d, want 0", args, code)
@@ -541,7 +565,7 @@ func TestCliDryRunColorFlag(t *testing.T) {
 				store, _ := setupStoreWithHome(t,
 					map[string]string{"vimrc": "same\n"},
 					map[string]string{".vimrc": "same\n"},
-					"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+					singleBaseToml(),
 				)
 				args := []string{base, "--dry-run", "--color=" + c}
 				if code, _, _ := runCli(t, store, args); code != 0 {
@@ -575,7 +599,6 @@ func TestCliPushErrorExitsNonZero(t *testing.T) {
 }
 
 // Seam: CLIコマンド境界 (init 雛形作成)
-// 成功・help・余分引数・実行エラーの外部挙動のみを検証する。
 func TestCliInitDispatches(t *testing.T) {
 	cwd := t.TempDir()
 	code, out, _ := runCli(t, cwd, []string{"init"})
@@ -587,8 +610,14 @@ func TestCliInitDispatches(t *testing.T) {
 			t.Errorf("output should contain %q, got %q", want, out)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(cwd, "mdots.toml")); err != nil {
-		t.Errorf("mdots.toml should be created: %v", err)
+	data, err := os.ReadFile(filepath.Join(cwd, "mdots.toml"))
+	if err != nil {
+		t.Fatalf("mdots.toml should be created: %v", err)
+	}
+	for _, want := range []string{"default_target"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("init template should contain %q, got:\n%s", want, data)
+		}
 	}
 }
 
@@ -621,7 +650,7 @@ func TestCliInitRejectsExtraArgs(t *testing.T) {
 }
 
 func TestCliInitAlreadyExists(t *testing.T) {
-	store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+	store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 	code, _, errOut := runCli(t, store, []string{"init"})
 	if code == 0 {
 		t.Fatal("Run(init) on existing Store: exit = 0, want non-zero")
@@ -631,27 +660,26 @@ func TestCliInitAlreadyExists(t *testing.T) {
 	}
 }
 
-// Seam: CLIコマンド境界 (targets 一覧表示)
-// 定義済みTarget名の一覧表示の外部挙動のみを検証する。
+// Seam: CLIコマンド境界 (targets 一覧表示・既定印)
 func TestCliTargetsDispatches(t *testing.T) {
 	store, _ := setupStoreWithHome(t, nil, nil,
-		"[entries]\n"+
-			`"~/.c" = { targets = { wsl = { src = "c-wsl" }, win = { src = "c-win" } } }`+"\n"+
-			`"~/.b" = { targets = { win = { src = "b-win" } } }`+"\n"+
-			`"~/.a" = { src = "a" }`+"\n",
+		"default_target = \"win\"\n"+
+			"[targets.wsl.\"~/.c\"]\nsrc = \"c-wsl\"\n"+
+			"[targets.win.\"~/.c\"]\nsrc = \"c-win\"\n"+
+			"[targets.win.\"~/.b\"]\nsrc = \"b-win\"\n",
 	)
 	code, out, _ := runCli(t, store, []string{"targets"})
 	if code != 0 {
 		t.Fatalf("Run(targets) exit = %d, want 0", code)
 	}
-	if out != "win\nwsl\n" {
-		t.Errorf("output = %q, want %q", out, "win\nwsl\n")
+	if out != "win (default)\nwsl\n" {
+		t.Errorf("output = %q, want %q", out, "win (default)\nwsl\n")
 	}
 }
 
 func TestCliTargetsEmpty(t *testing.T) {
 	store, _ := setupStoreWithHome(t, nil, nil,
-		"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+		"default_target = \"base\"\n",
 	)
 	code, out, _ := runCli(t, store, []string{"targets"})
 	if code != 0 {
@@ -664,7 +692,7 @@ func TestCliTargetsEmpty(t *testing.T) {
 
 func TestCliTargetsRejectsExtraArgs(t *testing.T) {
 	store, _ := setupStoreWithHome(t, nil, nil,
-		"[entries]\n\"~/.a\" = { src = \"a\" }\n",
+		"default_target = \"base\"\n",
 	)
 	code, _, errOut := runCli(t, store, []string{"targets", "extra"})
 	if code == 0 {
@@ -686,21 +714,19 @@ func TestCliTargetsWithoutStore(t *testing.T) {
 	}
 }
 
-// Seam: CLIコマンド境界 (add 登録)
-// 位置引数1件の登録・成功文面・引数なし/余剰/未知フラグ拒否・実行エラーの
-// 外部挙動のみを検証する。実Store/HOME上の結合で確認する。
+// Seam: CLIコマンド境界 (add 登録・既定解決)
 func TestCliAddDispatches(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "set number\n"},
-		"[entries]\n",
+		"default_target = \"base\"\n",
 	)
 	code, out, _ := runCli(t, store, []string{"add", "~/.vimrc"})
 	if code != 0 {
 		t.Fatalf("Run(add ~/.vimrc) exit = %d, want 0", code)
 	}
-	if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "dotfiles/.vimrc") {
-		t.Errorf("output should contain key and src in one line, got %q", out)
+	if !strings.Contains(out, "~/.vimrc") || !strings.Contains(out, "base") || !strings.Contains(out, "dotfiles/base/.vimrc") {
+		t.Errorf("output should contain key, default target and src in one line, got %q", out)
 	}
 	if strings.Count(strings.TrimSuffix(out, "\n"), "\n") != 0 {
 		t.Errorf("output should be one line, got %q", out)
@@ -719,7 +745,7 @@ func TestCliAddHelp(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "x\n"},
-			"[entries]\n",
+			"default_target = \"base\"\n",
 		)
 		code, out, _ := runCli(t, store, args)
 		if code != 0 {
@@ -742,14 +768,14 @@ func TestCliAddHelp(t *testing.T) {
 
 func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
 	t.Run("引数なしは拒否", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 		code, _, _ := runCli(t, store, []string{"add"})
 		if code == 0 {
 			t.Error("Run(add): exit = 0, want non-zero")
 		}
 	})
 	t.Run("余剰は拒否", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 		code, _, errOut := runCli(t, store, []string{"add", "~/.a", "~/.b"})
 		if code == 0 {
 			t.Error("Run(add a b): exit = 0, want non-zero")
@@ -761,7 +787,6 @@ func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
 }
 
 // Seam: CLIコマンド境界 (add --target 登録)
-// --target/-t の解釈・空値拒否・成功文面の外部挙動を検証する。
 func TestCliAddWithTargetDispatches(t *testing.T) {
 	for _, args := range [][]string{
 		{"add", "--target", "win", "~/.vimrc"},
@@ -771,7 +796,7 @@ func TestCliAddWithTargetDispatches(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			nil,
 			map[string]string{".vimrc": "set number\n"},
-			"[entries]\n",
+			"default_target = \"base\"\n",
 		)
 		code, out, _ := runCli(t, store, args)
 		if code != 0 {
@@ -787,7 +812,7 @@ func TestCliAddWithTargetDispatches(t *testing.T) {
 }
 
 func TestCliAddRejectsEmptyTarget(t *testing.T) {
-	store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+	store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 	code, _, _ := runCli(t, store, []string{"add", "--target=", "~/.vimrc"})
 	if code == 0 {
 		t.Error("Run(add --target=): exit = 0, want non-zero")
@@ -801,7 +826,7 @@ func TestCliAddRejectsFlags(t *testing.T) {
 		{"add", "--unknown", "~/.vimrc"},
 		{"add", "~/.vimrc", "--unknown"},
 	} {
-		store, _ := setupStoreWithHome(t, nil, nil, "[entries]\n")
+		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
 		code, _, _ := runCli(t, store, args)
 		if code == 0 {
 			t.Errorf("Run(%v): exit = 0, want non-zero", args)
@@ -813,7 +838,7 @@ func TestCliAddDuplicateError(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "x\n"},
-		"[entries]\n\"~/.vimrc\" = { src = \"dotfiles/.vimrc\" }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"dotfiles/base/.vimrc\"\n",
 	)
 	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc"})
 	if code == 0 {

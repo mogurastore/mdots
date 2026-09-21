@@ -11,140 +11,158 @@ import (
 
 // Seam: 実行系境界 (push/pull の Target 解決・配線)
 // 実FS上の Store/dest を用い、Push/Pull の外部挙動のみを検証する。
-// 表面（フラグ解釈・exit 委譲）は internal/cli、解決規則の網羅は internal/config が担う。
+// 解決は単一 Target のみで、省略時は default_target へ解決する。
+// 未定義名・欠落した default_target はエラーにする（旧黙示フォールバックの反転）。
+
+func newEntriesToml() string {
+	return "default_target = \"base\"\n" +
+		"[targets.base.\"~/.base.conf\"]\nsrc = \"base.conf\"\n" +
+		"[targets.win.\"~/.win.conf\"]\nsrc = \"win.conf\"\n" +
+		"[targets.wsl.\"~/.wsl.conf\"]\nsrc = \"wsl.conf\"\n"
+}
 
 func TestPushWithTargetRepresentative(t *testing.T) {
-	entriesToml := "[entries]\n" +
-		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n" +
-		`"~/.wsl.conf" = { targets = { wsl = { src = "wsl.conf" } } }` + "\n"
+	entriesToml := newEntriesToml()
 	storeFiles := map[string]string{
-		"common.conf": "common\n",
-		"win.conf":    "win\n",
-		"wsl.conf":    "wsl\n",
+		"base.conf": "base\n",
+		"win.conf":  "win\n",
+		"wsl.conf":  "wsl\n",
 	}
 
-	t.Run("無指定は指定なしのみ", func(t *testing.T) {
+	t.Run("省略時は既定のみ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
 		if err := Push(store, "", io.Discard); err != nil {
 			t.Fatalf("Push without target error = %v, want nil", err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".common.conf")); err != nil {
-			t.Errorf(".common.conf should be copied: %v", err)
+		if _, err := os.Stat(filepath.Join(home, ".base.conf")); err != nil {
+			t.Errorf(".base.conf should be copied: %v", err)
 		}
 		for _, f := range []string{".win.conf", ".wsl.conf"} {
 			if _, err := os.Stat(filepath.Join(home, f)); err == nil {
-				t.Errorf("%s should NOT be copied without target", f)
+				t.Errorf("%s should NOT be copied with default", f)
 			}
 		}
 	})
 
-	t.Run("指定は指定なし＋一致のみ", func(t *testing.T) {
+	t.Run("明示は単一のみ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
 		if err := Push(store, "win", io.Discard); err != nil {
 			t.Fatalf("Push with target win error = %v, want nil", err)
 		}
-		for _, f := range []string{".common.conf", ".win.conf"} {
-			if _, err := os.Stat(filepath.Join(home, f)); err != nil {
-				t.Errorf("%s should be copied: %v", f, err)
-			}
+		if _, err := os.Stat(filepath.Join(home, ".win.conf")); err != nil {
+			t.Errorf(".win.conf should be copied: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".wsl.conf")); err == nil {
-			t.Error(".wsl.conf should NOT be copied with target win")
+		for _, f := range []string{".base.conf", ".wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(home, f)); err == nil {
+				t.Errorf("%s should NOT be copied with target win", f)
+			}
 		}
 	})
 
-	t.Run("未知Targetは指定なしのみ", func(t *testing.T) {
-		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
+	t.Run("未知Targetはエラー", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
-		if err := Push(store, "linux", io.Discard); err != nil {
-			t.Fatalf("Push with unknown target error = %v, want nil", err)
+		err := Push(store, "linux", io.Discard)
+		if err == nil {
+			t.Fatal("Push with unknown target: error = nil, want non-nil")
 		}
-		if _, err := os.Stat(filepath.Join(home, ".common.conf")); err != nil {
-			t.Errorf(".common.conf should be copied: %v", err)
-		}
-		for _, f := range []string{".win.conf", ".wsl.conf"} {
-			if _, err := os.Stat(filepath.Join(home, f)); err == nil {
-				t.Errorf("%s should NOT be copied with unknown target", f)
+		for _, want := range []string{"linux", "default_target", "targets"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("未知エラーは %q を含むべき, got %q", want, err.Error())
 			}
+		}
+	})
+
+	t.Run("同一destの跨Targetは各々解決", func(t *testing.T) {
+		toml := "default_target = \"base\"\n" +
+			"[targets.base.\"~/.shared\"]\nsrc = \"base-shared\"\n" +
+			"[targets.wsl.\"~/.shared\"]\nsrc = \"wsl-shared\"\n"
+		files := map[string]string{"base-shared": "base\n", "wsl-shared": "wsl\n"}
+		store, home := setupStoreWithHome(t, files, nil, toml)
+		if err := Push(store, "", io.Discard); err != nil {
+			t.Fatalf("Push default error = %v", err)
+		}
+		got, err := os.ReadFile(filepath.Join(home, ".shared"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "base\n" {
+			t.Errorf("shared content = %q, want base", got)
+		}
+		store2, home2 := setupStoreWithHome(t, files, nil, toml)
+		if err := Push(store2, "wsl", io.Discard); err != nil {
+			t.Fatalf("Push wsl error = %v", err)
+		}
+		got2, err := os.ReadFile(filepath.Join(home2, ".shared"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got2) != "wsl\n" {
+			t.Errorf("shared content = %q, want wsl", got2)
 		}
 	})
 }
 
 func TestPullWithTargetRepresentative(t *testing.T) {
-	entriesToml := "[entries]\n" +
-		`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-		`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n" +
-		`"~/.wsl.conf" = { targets = { wsl = { src = "wsl.conf" } } }` + "\n"
+	entriesToml := newEntriesToml()
 	homeFiles := map[string]string{
-		".common.conf": "common edited\n",
-		".win.conf":    "win edited\n",
-		".wsl.conf":    "wsl edited\n",
+		".base.conf": "base edited\n",
+		".win.conf":  "win edited\n",
+		".wsl.conf":  "wsl edited\n",
 	}
 
-	t.Run("指定は指定なし＋一致のみ", func(t *testing.T) {
+	t.Run("明示は単一のみ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
 		if err := Pull(store, "win", io.Discard); err != nil {
 			t.Fatalf("Pull with target win error = %v, want nil", err)
 		}
-		for _, tc := range []struct{ name, want string }{
-			{"common.conf", "common edited\n"},
-			{"win.conf", "win edited\n"},
-		} {
-			got, err := os.ReadFile(filepath.Join(store, tc.name))
-			if err != nil {
-				t.Fatalf("store read error %s: %v", tc.name, err)
-			}
-			if string(got) != tc.want {
-				t.Errorf("store %s content = %q, want %q", tc.name, got, tc.want)
-			}
+		got, err := os.ReadFile(filepath.Join(store, "win.conf"))
+		if err != nil {
+			t.Fatalf("store read error: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(store, "wsl.conf")); err == nil {
-			t.Error("wsl.conf should NOT be pulled with target win")
+		if string(got) != "win edited\n" {
+			t.Errorf("store win.conf content = %q, want %q", got, "win edited\n")
+		}
+		for _, f := range []string{"base.conf", "wsl.conf"} {
+			if _, err := os.Stat(filepath.Join(store, f)); err == nil {
+				t.Errorf("%s should NOT be pulled with target win", f)
+			}
 		}
 	})
 
-	t.Run("無指定は指定なしのみ", func(t *testing.T) {
+	t.Run("省略時は既定のみ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
 		if err := Pull(store, "", io.Discard); err != nil {
 			t.Fatalf("Pull without target error = %v, want nil", err)
 		}
-		if _, err := os.Stat(filepath.Join(store, "common.conf")); err != nil {
-			t.Errorf("common.conf should be pulled: %v", err)
+		if _, err := os.Stat(filepath.Join(store, "base.conf")); err != nil {
+			t.Errorf("base.conf should be pulled: %v", err)
 		}
 		for _, f := range []string{"win.conf", "wsl.conf"} {
 			if _, err := os.Stat(filepath.Join(store, f)); err == nil {
-				t.Errorf("%s should NOT be pulled without target", f)
+				t.Errorf("%s should NOT be pulled with default", f)
 			}
 		}
 	})
 
-	t.Run("未知Targetは指定なしのみ", func(t *testing.T) {
+	t.Run("未知Targetはエラー", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
-		if err := Pull(store, "linux", io.Discard); err != nil {
-			t.Fatalf("Pull with unknown target error = %v, want nil", err)
-		}
-		if _, err := os.Stat(filepath.Join(store, "common.conf")); err != nil {
-			t.Errorf("common.conf should be pulled: %v", err)
-		}
-		for _, f := range []string{"win.conf", "wsl.conf"} {
-			if _, err := os.Stat(filepath.Join(store, f)); err == nil {
-				t.Errorf("%s should NOT be pulled with unknown target", f)
-			}
+		if err := Pull(store, "linux", io.Discard); err == nil {
+			t.Fatal("Pull with unknown target: error = nil, want non-nil")
 		}
 	})
 }
 
 func TestPushFromSubdirFails(t *testing.T) {
 	store, home := setupStoreWithHome(t,
-		map[string]string{"vimrc": "x\n"},
+		map[string]string{"dotfiles/base/vimrc": "x\n"},
 		nil,
-		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"dotfiles/base/vimrc\"\n",
 	)
 	sub := filepath.Join(store, "a", "b")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -164,7 +182,7 @@ func TestPullMissingDestIsError(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		nil,
-		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
 	)
 
 	if err := Pull(store, "", io.Discard); err == nil {
@@ -173,14 +191,11 @@ func TestPullMissingDestIsError(t *testing.T) {
 }
 
 // Seam: 実行系境界 (push/pull の override 保護配線代表例)
-// 実FS上の Store/dest を用い、保護と継続の外部挙動のみを検証する。
-// 新規作成・権限・差分詳細は同期・差分の各境界テストに寄せる。
-// skip 警告の文面は TestPushOverrideSkippedWarnsToStderr が押さえる。
 func TestPushOverrideProtectsExistingRepresentative(t *testing.T) {
 	store, home := setupStoreWithHome(t,
 		map[string]string{"vimrc": "new\n"},
 		map[string]string{".vimrc": "old\n"},
-		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\", override = false }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
 	if err := Push(store, "", io.Discard); err != nil {
@@ -199,7 +214,7 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		map[string]string{"vimrc": "old\n"},
 		map[string]string{".vimrc": "new\n"},
-		"[entries]\n\"~/.vimrc\" = { src = \"vimrc\", override = false }\n",
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
 	if err := Pull(store, "", io.Discard); err != nil {
@@ -214,43 +229,33 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 	}
 }
 
-// Seam: 実行系境界 (targets 一覧)
-// Store を用い、Targets の外部挙動のみを検証する。
-// 集約・ソートの網羅は設定境界テストが保証する。
-// 余剰引数拒否は CLI 表面（internal/cli）の責務のためここでは扱わない。
+// Seam: 実行系境界 (targets 一覧・既定印)
 func TestTargetsRepresentative(t *testing.T) {
-	t.Run("分散したTargetを重複排除・ソートして返す", func(t *testing.T) {
+	t.Run("分散したTargetを重複排除・ソートし既定に印", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, nil,
-			"[entries]\n"+
-				`"~/.c" = { targets = { wsl = { src = "c-wsl" }, win = { src = "c-win" } } }`+"\n"+
-				`"~/.b" = { targets = { win = { src = "b-win" } } }`+"\n"+
-				`"~/.a" = { src = "a" }`+"\n",
+			"default_target = \"win\"\n"+
+				"[targets.wsl.\"~/.c\"]\nsrc = \"c-wsl\"\n"+
+				"[targets.win.\"~/.c\"]\nsrc = \"c-win\"\n"+
+				"[targets.win.\"~/.b\"]\nsrc = \"b-win\"\n",
 		)
 		got, err := Targets(store)
 		if err != nil {
 			t.Fatalf("Targets error = %v, want nil", err)
 		}
-		if len(got) != 2 || got[0] != "win" || got[1] != "wsl" {
-			t.Errorf("Targets = %q, want %q", got, []string{"win", "wsl"})
+		want := []string{"win (default)", "wsl"}
+		if len(got) != len(want) {
+			t.Fatalf("Targets = %q, want %q", got, want)
 		}
-	})
-
-	t.Run("Target未定義で空・nilエラー", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil,
-			"[entries]\n\"~/.a\" = { src = \"a\" }\n",
-		)
-		got, err := Targets(store)
-		if err != nil {
-			t.Fatalf("Targets error = %v, want nil", err)
-		}
-		if len(got) != 0 {
-			t.Errorf("Targets = %q, want empty", got)
+		for i, w := range want {
+			if got[i] != w {
+				t.Errorf("index %d: got %q, want %q", i, got[i], w)
+			}
 		}
 	})
 
 	t.Run("toml不正でエラー", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, nil,
-			"[entries]\n\"~/.a\" = {}\n",
+			"default_target = \"base\"\n[targets.base.\"~/.a\"]\noverride = false\n",
 		)
 		if _, err := Targets(store); err == nil {
 			t.Error("Targets with invalid toml: error = nil, want non-nil")
@@ -259,14 +264,12 @@ func TestTargetsRepresentative(t *testing.T) {
 }
 
 // Seam: 実行系境界 (push/pull --dry-run の代表例)
-// 実FS上の Store/dest を用い、書き込みなし・差分出力の外部挙動のみを検証する。
-// フラグ解釈・exit 委譲は internal/cli、差分詳細は同期境界テストに寄せる。
 func TestDryRunRepresentative(t *testing.T) {
 	t.Run("pushは差分を出して書き込まない", func(t *testing.T) {
 		store, home := setupStoreWithHome(t,
 			map[string]string{"vimrc": "new\n"},
 			map[string]string{".vimrc": "old\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -291,7 +294,7 @@ func TestDryRunRepresentative(t *testing.T) {
 		store, home := setupStoreWithHome(t,
 			map[string]string{"vimrc": "old\n"},
 			map[string]string{".vimrc": "new\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
 		)
 
 		var out, errOut bytes.Buffer
@@ -313,7 +316,7 @@ func TestDryRunRepresentative(t *testing.T) {
 		store, _ := setupStoreWithHome(t,
 			map[string]string{"vimrc": "same\n"},
 			map[string]string{".vimrc": "same\n"},
-			"[entries]\n\"~/.vimrc\" = { src = \"vimrc\" }\n",
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
 		)
 
 		for _, tc := range []struct {
@@ -334,12 +337,12 @@ func TestDryRunRepresentative(t *testing.T) {
 	})
 
 	t.Run("Target指定で解決結果のみが差分対象になる", func(t *testing.T) {
-		entriesToml := "[entries]\n" +
-			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-			`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
+		entriesToml := "default_target = \"base\"\n" +
+			"[targets.base.\"~/.base.conf\"]\nsrc = \"base.conf\"\n" +
+			"[targets.win.\"~/.win.conf\"]\nsrc = \"win.conf\"\n"
 		store, _ := setupStoreWithHome(t,
-			map[string]string{"common.conf": "same\n", "win.conf": "new\n"},
-			map[string]string{".common.conf": "same\n", ".win.conf": "old\n"},
+			map[string]string{"base.conf": "same\n", "win.conf": "new\n"},
+			map[string]string{".base.conf": "same\n", ".win.conf": "old\n"},
 			entriesToml,
 		)
 
@@ -350,24 +353,31 @@ func TestDryRunRepresentative(t *testing.T) {
 		if !strings.Contains(out.String(), "win.conf") {
 			t.Errorf("win Entryの差分を含むべき, got %q", out.String())
 		}
-		if strings.Contains(out.String(), "common.conf") {
-			t.Errorf("差分なしの指定なしEntryを含めるべきでない, got %q", out.String())
+		if strings.Contains(out.String(), "base.conf") {
+			t.Errorf("差分なしの既定Entryを含めるべきでない, got %q", out.String())
 		}
 
 		out.Reset()
 		errOut.Reset()
-		if code := PushDryRun(store, "linux", "auto", &out, &errOut); code != 0 {
-			t.Errorf("PushDryRun with unknown target without applicable diff: exit = %d, want 0 (out=%q)", code, out.String())
+		if code := PushDryRun(store, "linux", "auto", &out, &errOut); code == 0 {
+			// 未知はエラー扱いで exit 1 だが、差分なしの 0 ではないことを確認する。
+			// エラー時は stderr に文言が出る。
+			if errOut.String() == "" {
+				t.Errorf("未知Targetはstderrにエラーのはず, got stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+		}
+		if !strings.Contains(errOut.String(), "linux") {
+			t.Errorf("未知エラーはTarget名を含むべき, got %q", errOut.String())
 		}
 	})
 
 	t.Run("pullのTarget指定でも解決結果のみが差分対象になる", func(t *testing.T) {
-		entriesToml := "[entries]\n" +
-			`"~/.common.conf" = { src = "common.conf" }` + "\n" +
-			`"~/.win.conf" = { targets = { win = { src = "win.conf" } } }` + "\n"
+		entriesToml := "default_target = \"base\"\n" +
+			"[targets.base.\"~/.base.conf\"]\nsrc = \"base.conf\"\n" +
+			"[targets.win.\"~/.win.conf\"]\nsrc = \"win.conf\"\n"
 		store, _ := setupStoreWithHome(t,
-			map[string]string{"common.conf": "same\n", "win.conf": "old\n"},
-			map[string]string{".common.conf": "same\n", ".win.conf": "new\n"},
+			map[string]string{"base.conf": "same\n", "win.conf": "old\n"},
+			map[string]string{".base.conf": "same\n", ".win.conf": "new\n"},
 			entriesToml,
 		)
 
@@ -381,8 +391,10 @@ func TestDryRunRepresentative(t *testing.T) {
 
 		out.Reset()
 		errOut.Reset()
-		if code := PullDryRun(store, "linux", "auto", &out, &errOut); code != 0 {
-			t.Errorf("PullDryRun with unknown target without applicable diff: exit = %d, want 0 (out=%q)", code, out.String())
+		if code := PullDryRun(store, "linux", "auto", &out, &errOut); code == 0 {
+			if errOut.String() == "" {
+				t.Errorf("未知Targetはstderrにエラーのはず, got stdout=%q", out.String())
+			}
 		}
 	})
 }
