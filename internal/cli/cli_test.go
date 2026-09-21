@@ -848,3 +848,86 @@ func TestCliAddDuplicateError(t *testing.T) {
 		t.Errorf("stderr should contain already registered, got %q", errOut)
 	}
 }
+
+// Seam: CLIコマンド境界 (doctor sharable検出・exit委譲)
+// 実行系は実appに直結し、t.TempDir上の実Storeで外部挙動
+// （exit code・出力文面・FS副作用）のみを検証する。
+
+func TestCliDoctorDetectsSharable(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		map[string]string{
+			"dotfiles/win/.vimrc": "same\n",
+			"dotfiles/wsl/.vimrc": "same\n",
+		},
+		nil,
+		"default_target = \"base\"\n"+
+			"[targets.win.\"~/.vimrc\"]\nsrc = \"dotfiles/win/.vimrc\"\n"+
+			"[targets.wsl.\"~/.vimrc\"]\nsrc = \"dotfiles/wsl/.vimrc\"\n",
+	)
+	code, out, errOut := runCli(t, store, []string{"doctor"})
+	if code != 1 {
+		t.Fatalf("Run(doctor) with sharable: exit = %d, want 1", code)
+	}
+	for _, want := range []string{"~/.vimrc", "dotfiles/win/.vimrc", "dotfiles/wsl/.vimrc"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout should contain %q, got %q", want, out)
+		}
+	}
+	if errOut != "" {
+		t.Errorf("stderr should be empty on candidates, got %q", errOut)
+	}
+}
+
+func TestCliDoctorNoSharable(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		map[string]string{"a-src": "aaa\n", "b-src": "bbb\n"},
+		nil,
+		"default_target = \"base\"\n"+
+			"[targets.win.\"~/.vimrc\"]\nsrc = \"a-src\"\n"+
+			"[targets.wsl.\"~/.vimrc\"]\nsrc = \"b-src\"\n",
+	)
+	code, out, _ := runCli(t, store, []string{"doctor"})
+	if code != 0 {
+		t.Fatalf("Run(doctor) without sharable: exit = %d, want 0", code)
+	}
+	if out != "No sharable entries.\n" {
+		t.Errorf("stdout = %q, want %q", out, "No sharable entries.\n")
+	}
+}
+
+func TestCliDoctorWithoutStore(t *testing.T) {
+	empty := t.TempDir()
+	code, _, errOut := runCli(t, empty, []string{"doctor"})
+	if code == 0 {
+		t.Fatal("Run(doctor) without Store: exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "mdots.toml not found in "+empty) {
+		t.Errorf("stderr should contain friendly message, got %q", errOut)
+	}
+}
+
+func TestCliDoctorRejectsExtraArgs(t *testing.T) {
+	store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
+	code, _, errOut := runCli(t, store, []string{"doctor", "extra"})
+	if code == 0 {
+		t.Error("Run(doctor extra): exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "unknown argument: extra") {
+		t.Errorf("stderr should contain unknown argument, got %q", errOut)
+	}
+}
+
+func TestCliDoctorHelp(t *testing.T) {
+	for _, args := range [][]string{{"doctor", "--help"}, {"doctor", "-h"}} {
+		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
+		code, out, _ := runCli(t, store, args)
+		if code != 0 {
+			t.Fatalf("Run(%v) exit = %d, want 0", args, code)
+		}
+		for _, want := range []string{"USAGE:", "doctor"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("Run(%v): output should contain %q, got %q", args, want, out)
+			}
+		}
+	}
+}

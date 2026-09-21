@@ -1,0 +1,3 @@
+# doctorでsharable検出のみ行う
+
+add -t後の重複srcへの気づき補助として新コマンドdoctorでsharableの検出のみ行い、既存コマンドへのヒント追加と自動修正はしないことにした。検出条件は同一dest×別src×Store上の内容一致とし、dest違いの内容一致と既に同一srcのものは対象外、比較はStore上のsrc同士のみでHOMEとoverride・モードの異同は無視し、3Target中2つ一致などの部分一致は内容ハッシュでグループ化して報告する。欠落ファイルはadd後pull前を騒がせないためskipし、ディレクトリ・読み込み失敗はエラーとし、出力は候補あり→exit 1・なし→No sharable entries.でexit 0として--dry-runの差分あり→1と整合させる。

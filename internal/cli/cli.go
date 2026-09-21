@@ -155,6 +155,12 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.targetsAction,
 			},
 			{
+				Name:   "doctor",
+				Usage:  "共有化可能なEntryを検出する",
+				Before: r.rejectExtraArgs(0),
+				Action: r.doctorAction,
+			},
+			{
 				Name:  "add",
 				Usage: "未登録の既存ファイルを新規Entryとして登録する",
 				Flags: []cliv3.Flag{
@@ -244,6 +250,13 @@ func (r *runner) targetsAction(_ context.Context, _ *cliv3.Command) error {
 	}
 	for _, name := range names {
 		fmt.Fprintln(r.stdout, name)
+	}
+	return nil
+}
+
+func (r *runner) doctorAction(_ context.Context, _ *cliv3.Command) error {
+	if code := app.Doctor(r.cwd, r.stdout, r.stderr); code != 0 {
+		return &exitError{code: code}
 	}
 	return nil
 }

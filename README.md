@@ -41,6 +41,9 @@ mdots targets
 # 差分を確認
 mdots push --dry-run
 mdots pull --dry-run
+
+# 共有化可能なEntryを検出
+mdots doctor
 ```
 
 ## 設定例（mdots.toml）

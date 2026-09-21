@@ -50,3 +50,7 @@ _Avoid_: overwrite, force
 
 **dotfiles**:
 Store直下でaddが生成する既定のsrc配置 (例: dotfiles/.vimrc)。必須ではなく推奨で、他のsrcも読み書きできる。
+
+**sharable**:
+同一destに紐づく別src間でStore上の内容が一致し共有化候補となる状態。
+_Avoid_: duplicate
