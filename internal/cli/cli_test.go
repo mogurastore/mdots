@@ -377,6 +377,85 @@ func TestCliPushDispatchesTarget(t *testing.T) {
 	})
 }
 
+// Seam: CLIコマンド境界 (push/pull 成功報告の表示)
+func TestCliPushPullReportsCopied(t *testing.T) {
+	t.Run("pushはstdoutへcopied", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			singleBaseToml(),
+		)
+		code, out, errOut := runCli(t, store, []string{"push"})
+		if code != 0 {
+			t.Fatalf("Run(push) exit = %d, want 0 (stderr=%q)", code, errOut)
+		}
+		if out != "copied vimrc -> ~/.vimrc\n" {
+			t.Errorf("stdout = %q, want copied line", out)
+		}
+	})
+	t.Run("pullはstdoutへcopied", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			singleBaseToml(),
+		)
+		code, out, errOut := runCli(t, store, []string{"pull"})
+		if code != 0 {
+			t.Fatalf("Run(pull) exit = %d, want 0 (stderr=%q)", code, errOut)
+		}
+		if out != "copied ~/.vimrc -> vimrc\n" {
+			t.Errorf("stdout = %q, want copied line", out)
+		}
+	})
+	t.Run("全skipはNo changesと警告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
+		)
+		code, out, errOut := runCli(t, store, []string{"push"})
+		if code != 0 {
+			t.Fatalf("Run(push) exit = %d, want 0 (stderr=%q)", code, errOut)
+		}
+		if out != "No changes.\n" {
+			t.Errorf("stdout = %q, want No changes.", out)
+		}
+		if !strings.Contains(errOut, "skipped: ~/.vimrc") {
+			t.Errorf("stderr should contain skipped, got %q", errOut)
+		}
+	})
+	t.Run("pull全skipはNo changesと警告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
+		)
+		code, out, errOut := runCli(t, store, []string{"pull"})
+		if code != 0 {
+			t.Fatalf("Run(pull) exit = %d, want 0 (stderr=%q)", code, errOut)
+		}
+		if out != "No changes.\n" {
+			t.Errorf("stdout = %q, want No changes.", out)
+		}
+		if !strings.Contains(errOut, "skipped: ~/.vimrc") {
+			t.Errorf("stderr should contain skipped, got %q", errOut)
+		}
+	})
+	t.Run("エラー時はstdoutに出さない", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			nil, nil,
+			singleBaseToml(),
+		)
+		code, out, _ := runCli(t, store, []string{"push"})
+		if code == 0 {
+			t.Fatal("Run(push) with missing src: exit = 0, want non-zero")
+		}
+		if out != "" {
+			t.Errorf("stdout on error = %q, want empty", out)
+		}
+	})
+}
+
 func TestCliShortFlags(t *testing.T) {
 	t.Run("push -t は --target と同じ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t,

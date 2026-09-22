@@ -32,7 +32,7 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 	t.Run("省略時は既定のみ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
-		if err := Push(store, "", io.Discard); err != nil {
+		if err := Push(store, "", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Push without target error = %v, want nil", err)
 		}
 		if _, err := os.Stat(filepath.Join(home, ".base.conf")); err != nil {
@@ -48,7 +48,7 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 	t.Run("明示は単一のみ", func(t *testing.T) {
 		store, home := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
-		if err := Push(store, "win", io.Discard); err != nil {
+		if err := Push(store, "win", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Push with target win error = %v, want nil", err)
 		}
 		if _, err := os.Stat(filepath.Join(home, ".win.conf")); err != nil {
@@ -64,7 +64,7 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 	t.Run("未知Targetはエラー", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, storeFiles, nil, entriesToml)
 
-		err := Push(store, "linux", io.Discard)
+		err := Push(store, "linux", io.Discard, io.Discard)
 		if err == nil {
 			t.Fatal("Push with unknown target: error = nil, want non-nil")
 		}
@@ -81,7 +81,7 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 			"[targets.wsl.\"~/.shared\"]\nsrc = \"wsl-shared\"\n"
 		files := map[string]string{"base-shared": "base\n", "wsl-shared": "wsl\n"}
 		store, home := setupStoreWithHome(t, files, nil, toml)
-		if err := Push(store, "", io.Discard); err != nil {
+		if err := Push(store, "", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Push default error = %v", err)
 		}
 		got, err := os.ReadFile(filepath.Join(home, ".shared"))
@@ -92,7 +92,7 @@ func TestPushWithTargetRepresentative(t *testing.T) {
 			t.Errorf("shared content = %q, want base", got)
 		}
 		store2, home2 := setupStoreWithHome(t, files, nil, toml)
-		if err := Push(store2, "wsl", io.Discard); err != nil {
+		if err := Push(store2, "wsl", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Push wsl error = %v", err)
 		}
 		got2, err := os.ReadFile(filepath.Join(home2, ".shared"))
@@ -116,7 +116,7 @@ func TestPullWithTargetRepresentative(t *testing.T) {
 	t.Run("明示は単一のみ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
-		if err := Pull(store, "win", io.Discard); err != nil {
+		if err := Pull(store, "win", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Pull with target win error = %v, want nil", err)
 		}
 		got, err := os.ReadFile(filepath.Join(store, "win.conf"))
@@ -136,7 +136,7 @@ func TestPullWithTargetRepresentative(t *testing.T) {
 	t.Run("省略時は既定のみ", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
-		if err := Pull(store, "", io.Discard); err != nil {
+		if err := Pull(store, "", io.Discard, io.Discard); err != nil {
 			t.Fatalf("Pull without target error = %v, want nil", err)
 		}
 		if _, err := os.Stat(filepath.Join(store, "base.conf")); err != nil {
@@ -152,7 +152,7 @@ func TestPullWithTargetRepresentative(t *testing.T) {
 	t.Run("未知Targetはエラー", func(t *testing.T) {
 		store, _ := setupStoreWithHome(t, nil, homeFiles, entriesToml)
 
-		if err := Pull(store, "linux", io.Discard); err == nil {
+		if err := Pull(store, "linux", io.Discard, io.Discard); err == nil {
 			t.Fatal("Pull with unknown target: error = nil, want non-nil")
 		}
 	})
@@ -169,7 +169,7 @@ func TestPushFromSubdirFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Push(sub, "", io.Discard); err == nil {
+	if err := Push(sub, "", io.Discard, io.Discard); err == nil {
 		t.Fatal("Push from subdir: error = nil, want non-nil")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".vimrc")); err == nil {
@@ -185,7 +185,7 @@ func TestPullMissingDestIsError(t *testing.T) {
 		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
 	)
 
-	if err := Pull(store, "", io.Discard); err == nil {
+	if err := Pull(store, "", io.Discard, io.Discard); err == nil {
 		t.Error("Pull with missing dest: error = nil, want non-nil")
 	}
 }
@@ -198,7 +198,7 @@ func TestPushOverrideProtectsExistingRepresentative(t *testing.T) {
 		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
-	if err := Push(store, "", io.Discard); err != nil {
+	if err := Push(store, "", io.Discard, io.Discard); err != nil {
 		t.Fatalf("Push with override=false error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(home, ".vimrc"))
@@ -217,7 +217,7 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
-	if err := Pull(store, "", io.Discard); err != nil {
+	if err := Pull(store, "", io.Discard, io.Discard); err != nil {
 		t.Fatalf("Pull with override=false error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "vimrc"))
@@ -227,6 +227,205 @@ func TestPullOverrideProtectsExistingRepresentative(t *testing.T) {
 	if string(got) != "old\n" {
 		t.Errorf("protected store content = %q, want %q", got, "old\n")
 	}
+}
+
+// Seam: 実行系境界 (push/pull 成功報告)
+func TestPushPullReportCopiedRepresentative(t *testing.T) {
+	t.Run("pushはsrc->destをstdoutへ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		if out.String() != "copied vimrc -> ~/.vimrc\n" {
+			t.Errorf("stdout = %q, want %q", out.String(), "copied vimrc -> ~/.vimrc\n")
+		}
+		if errOut.String() != "" {
+			t.Errorf("stderr = %q, want empty", errOut.String())
+		}
+	})
+
+	t.Run("pullはdest->srcをstdoutへ", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Pull(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Pull error = %v, want nil", err)
+		}
+		if out.String() != "copied ~/.vimrc -> vimrc\n" {
+			t.Errorf("stdout = %q, want %q", out.String(), "copied ~/.vimrc -> vimrc\n")
+		}
+	})
+
+	t.Run("複数は配置先ソート順", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"b-src": "b\n", "a-src": "a\n"},
+			nil,
+			"default_target = \"base\"\n[targets.base.\"~/.b\"]\nsrc = \"b-src\"\n[targets.base.\"~/.a\"]\nsrc = \"a-src\"\n",
+		)
+		var out bytes.Buffer
+		if err := Push(store, "", &out, io.Discard); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		want := "copied a-src -> ~/.a\ncopied b-src -> ~/.b\n"
+		if out.String() != want {
+			t.Errorf("stdout = %q, want %q", out.String(), want)
+		}
+	})
+
+	t.Run("全skipはNo changesと警告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		if out.String() != "No changes.\n" {
+			t.Errorf("stdout = %q, want %q", out.String(), "No changes.\n")
+		}
+		if !strings.Contains(errOut.String(), "skipped: ~/.vimrc") {
+			t.Errorf("stderr should contain skipped, got %q", errOut.String())
+		}
+	})
+
+	t.Run("一部skipは成功分のみ報告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"a-src": "a\n", "b-src": "b-new\n"},
+			map[string]string{".b": "b-old\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a-src\"\n[targets.base.\"~/.b\"]\nsrc = \"b-src\"\noverride = false\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		if out.String() != "copied a-src -> ~/.a\n" {
+			t.Errorf("stdout = %q, want only copied a", out.String())
+		}
+		if !strings.Contains(errOut.String(), "skipped: ~/.b") {
+			t.Errorf("stderr should contain skipped b, got %q", errOut.String())
+		}
+	})
+
+	t.Run("pull全skipはNo changesと警告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Pull(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Pull error = %v, want nil", err)
+		}
+		if out.String() != "No changes.\n" {
+			t.Errorf("stdout = %q, want %q", out.String(), "No changes.\n")
+		}
+		if !strings.Contains(errOut.String(), "skipped: ~/.vimrc") {
+			t.Errorf("stderr should contain skipped, got %q", errOut.String())
+		}
+	})
+
+	t.Run("pull一部skipは成功分のみ報告", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"a-src": "a-old\n", "b-src": "b-old\n"},
+			map[string]string{".a": "a-new\n", ".b": "b-new\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a-src\"\n[targets.base.\"~/.b\"]\nsrc = \"b-src\"\noverride = false\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Pull(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Pull error = %v, want nil", err)
+		}
+		if out.String() != "copied ~/.a -> a-src\n" {
+			t.Errorf("stdout = %q, want only copied a", out.String())
+		}
+		if !strings.Contains(errOut.String(), "skipped: ~/.b") {
+			t.Errorf("stderr should contain skipped b, got %q", errOut.String())
+		}
+	})
+
+	t.Run("Entry0件はNo changes", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t, nil, nil,
+			"default_target = \"base\"\n[targets.base]\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		if out.String() != "No changes.\n" {
+			t.Errorf("push stdout = %q, want %q", out.String(), "No changes.\n")
+		}
+		out.Reset()
+		errOut.Reset()
+		if err := Pull(store, "", &out, &errOut); err != nil {
+			t.Fatalf("Pull error = %v, want nil", err)
+		}
+		if out.String() != "No changes.\n" {
+			t.Errorf("pull stdout = %q, want %q", out.String(), "No changes.\n")
+		}
+	})
+
+	t.Run("エラー時はstdoutに出さない", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			nil, nil,
+			"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err == nil {
+			t.Fatal("Push with missing src: error = nil, want non-nil")
+		}
+		if out.String() != "" {
+			t.Errorf("push stdout on error = %q, want empty", out.String())
+		}
+		out.Reset()
+		errOut.Reset()
+		if err := Pull(store, "", &out, &errOut); err == nil {
+			t.Fatal("Pull with missing dest: error = nil, want non-nil")
+		}
+		if out.String() != "" {
+			t.Errorf("pull stdout on error = %q, want empty", out.String())
+		}
+	})
+
+	t.Run("部分コピー後のエラーは報告しない", func(t *testing.T) {
+		store, home := setupStoreWithHome(t,
+			map[string]string{"a-src": "a\n"},
+			nil,
+			"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a-src\"\n[targets.base.\"~/.b\"]\nsrc = \"b-missing\"\n",
+		)
+		var out, errOut bytes.Buffer
+		if err := Push(store, "", &out, &errOut); err == nil {
+			t.Fatal("Push partial error: error = nil, want non-nil")
+		}
+		if out.String() != "" {
+			t.Errorf("push stdout on partial error = %q, want empty", out.String())
+		}
+		if _, err := os.Stat(filepath.Join(home, ".a")); err != nil {
+			t.Errorf("first entry should be copied before error: %v", err)
+		}
+
+		store2, _ := setupStoreWithHome(t,
+			map[string]string{"a-src": "a-old\n"},
+			map[string]string{".a": "a-new\n"},
+			"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a-src\"\n[targets.base.\"~/.b\"]\nsrc = \"b-src\"\n",
+		)
+		out.Reset()
+		errOut.Reset()
+		if err := Pull(store2, "", &out, &errOut); err == nil {
+			t.Fatal("Pull partial error: error = nil, want non-nil")
+		}
+		if out.String() != "" {
+			t.Errorf("pull stdout on partial error = %q, want empty", out.String())
+		}
+	})
 }
 
 // Seam: 実行系境界 (targets 一覧・既定印)

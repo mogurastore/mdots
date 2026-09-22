@@ -46,9 +46,12 @@ func TestPushOverrideSkippedWarnsToStderr(t *testing.T) {
 		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\noverride = false\n",
 	)
 
-	var errOut bytes.Buffer
-	if err := Push(store, "", &errOut); err != nil {
+	var out, errOut bytes.Buffer
+	if err := Push(store, "", &out, &errOut); err != nil {
 		t.Fatalf("Push exit error = %v, want nil", err)
+	}
+	if out.String() != "No changes.\n" {
+		t.Errorf("stdout = %q, want %q", out.String(), "No changes.\n")
 	}
 	if got, err := os.ReadFile(filepath.Join(home, ".vimrc")); err != nil || string(got) != "old\n" {
 		t.Fatalf("protected dest content = %q err = %v, want %q", got, err, "old\n")

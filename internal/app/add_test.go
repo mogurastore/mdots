@@ -74,7 +74,7 @@ func TestAddWithTargetRegistersTargetsForm(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(store, "dotfiles", "win", ".vimrc")); err == nil {
 		t.Error("Store src must NOT be created by add --target (pull collects it)")
 	}
-	if err := Pull(store, "win", io.Discard); err != nil {
+	if err := Pull(store, "win", io.Discard, io.Discard); err != nil {
 		t.Fatalf("Pull(win) after add error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "win", ".vimrc"))
@@ -104,7 +104,7 @@ func TestAddWithTargetMergesNewTarget(t *testing.T) {
 	if !strings.Contains(body, "win") || !strings.Contains(body, "wsl") {
 		t.Errorf("mdots.toml should contain both targets, got:\n%s", body)
 	}
-	if err := Pull(store, "wsl", io.Discard); err != nil {
+	if err := Pull(store, "wsl", io.Discard, io.Discard); err != nil {
 		t.Fatalf("Pull(wsl) after merge error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "wsl", ".vimrc"))
@@ -126,7 +126,7 @@ func TestAddPullCollectsAfterAdd(t *testing.T) {
 	if _, _, _, err := Add(store, "~/.vimrc", ""); err != nil {
 		t.Fatalf("Add error = %v, want nil", err)
 	}
-	if err := Pull(store, "", io.Discard); err != nil {
+	if err := Pull(store, "", io.Discard, io.Discard); err != nil {
 		t.Fatalf("Pull after add error = %v, want nil", err)
 	}
 	got, err := os.ReadFile(filepath.Join(store, "dotfiles", "base", ".vimrc"))
