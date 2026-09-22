@@ -42,7 +42,7 @@ mdots targets
 mdots push --dry-run
 mdots pull --dry-run
 
-# 共有化可能なEntryを検出
+# Store上で内容が一致するsrcを検出
 mdots doctor
 ```
 
