@@ -206,7 +206,7 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
 		return &exitError{code: 1}
 	}
-	if err := app.Push(r.cwd, target, r.stderr); err != nil {
+	if err := app.Push(r.cwd, target, r.stdout, r.stderr); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
@@ -226,7 +226,7 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
 		return &exitError{code: 1}
 	}
-	if err := app.Pull(r.cwd, target, r.stderr); err != nil {
+	if err := app.Pull(r.cwd, target, r.stdout, r.stderr); err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}

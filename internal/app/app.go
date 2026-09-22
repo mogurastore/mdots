@@ -105,10 +105,35 @@ func reportSkipped(stderr io.Writer, skipped []config.Entry, op string) {
 	}
 }
 
+// reportCopied はコピー成功を stdout に報告する。方向に合わせて src/dest の順を変える。
+// push は Store src -> dest、pull は dest -> Store src である。
+// コピー0件（該当なし・全skip）は No changes. を出す。
+func reportCopied(stdout io.Writer, entries []config.Entry, skipped []config.Entry, op string) {
+	skippedSet := make(map[string]struct{}, len(skipped))
+	for _, s := range skipped {
+		skippedSet[s.Dest] = struct{}{}
+	}
+	copied := 0
+	for _, e := range entries {
+		if _, ok := skippedSet[e.Dest]; ok {
+			continue
+		}
+		copied++
+		if op == "push" {
+			fmt.Fprintf(stdout, "copied %s -> %s\n", e.Src, e.Dest)
+		} else {
+			fmt.Fprintf(stdout, "copied %s -> %s\n", e.Dest, e.Src)
+		}
+	}
+	if copied == 0 {
+		fmt.Fprintln(stdout, "No changes.")
+	}
+}
+
 // runCopy は push/pull のコピー系の共有本体である。方向の違いは copyFn と op に寄せ、
 // 各 action（Push/Pull）は薄い委譲に留める。
-// skip は警告として stderr に報告し、全体は成功で終える。
-func runCopy(cwd string, target string, op string, stderr io.Writer, copyFn func(string, []config.Entry) ([]config.Entry, error)) error {
+// 成功分は stdout に報告し、skip は警告として stderr に報告し、全体は成功で終える。
+func runCopy(cwd string, target string, op string, stdout, stderr io.Writer, copyFn func(string, []config.Entry) ([]config.Entry, error)) error {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		return err
@@ -117,6 +142,7 @@ func runCopy(cwd string, target string, op string, stderr io.Writer, copyFn func
 	if err != nil {
 		return err
 	}
+	reportCopied(stdout, entries, skipped, op)
 	reportSkipped(stderr, skipped, op)
 	return nil
 }
@@ -124,8 +150,9 @@ func runCopy(cwd string, target string, op string, stderr io.Writer, copyFn func
 // Push は単一 Target の Entry を Store から dest へコピーする。
 // target 省略時は default_target へ解決する。未定義名・欠落した default_target はエラーにする。
 // override=false の既存 dest は保護して skip 継続し、警告を stderr に出す。
-func Push(cwd string, target string, stderr io.Writer) error {
-	return runCopy(cwd, target, "push", stderr, sync.Push)
+// 成功分は stdout に copied <src> -> <dest> を出す。
+func Push(cwd string, target string, stdout, stderr io.Writer) error {
+	return runCopy(cwd, target, "push", stdout, stderr, sync.Push)
 }
 
 // Init はカレント直下に mdots.toml 雛形を作る。
@@ -152,8 +179,9 @@ func Targets(cwd string) ([]string, error) {
 // Pull は単一 Target の Entry を dest から Store へ回収する。
 // target 省略時は default_target へ解決する。未定義名・欠落した default_target はエラーにする。
 // override=false の既存 Store は保護して skip 継続し、警告を stderr に出す。
-func Pull(cwd string, target string, stderr io.Writer) error {
-	return runCopy(cwd, target, "pull", stderr, sync.Pull)
+// 成功分は stdout に copied <dest> -> <src> を出す。
+func Pull(cwd string, target string, stdout, stderr io.Writer) error {
+	return runCopy(cwd, target, "pull", stdout, stderr, sync.Pull)
 }
 
 // emitDiff は差分出力と exit 対応を一本化する。差分ありは出力して 1、なしは No changes. を出して 0。
