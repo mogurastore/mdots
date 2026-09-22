@@ -306,10 +306,10 @@ func TestLoadNewFormat(t *testing.T) {
 // 空・欠落を明確に失敗させる外部挙動を検証する。
 func TestLoadValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"空targetは拒否":        "default_target = \"base\"\n[targets.\"\".\"~/.a\"]\nsrc = \"a\"\n",
-		"空destは拒否":          "default_target = \"base\"\n[targets.base.\"\"]\nsrc = \"a\"\n",
-		"空srcは拒否":           "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"\"\n",
-		"src欠落は拒否":          "default_target = \"base\"\n[targets.base.\"~/.a\"]\noverride = false\n",
+		"空targetは拒否":      "default_target = \"base\"\n[targets.\"\".\"~/.a\"]\nsrc = \"a\"\n",
+		"空destは拒否":        "default_target = \"base\"\n[targets.base.\"\"]\nsrc = \"a\"\n",
+		"空srcは拒否":         "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"\"\n",
+		"src欠落は拒否":        "default_target = \"base\"\n[targets.base.\"~/.a\"]\noverride = false\n",
 		"targets非テーブルは拒否": "default_target = \"base\"\ntargets = \"x\"\n",
 	}
 	for name, body := range cases {
@@ -334,11 +334,11 @@ func TestLoadRejectsUnexpectedFormat(t *testing.T) {
 		body string
 		want string
 	}{
-		"旧[[entries]]配列は拒否":   {"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n", "unknown field"},
+		"旧[[entries]]配列は拒否": {"[[entries]]\nsrc = \"vimrc\"\ndest = \"~/.vimrc\"\n", "unknown field"},
 		"旧[entries]テーブルは拒否": {"[entries.\"~/.a\"]\nsrc = \"a\"\n", "unknown field"},
-		"無指定Entry形式は拒否":      {"default_target = \"base\"\n[entries]\n\"~/.a\" = { src = \"a\" }\n", "unknown field"},
+		"無指定Entry形式は拒否":     {"default_target = \"base\"\n[entries]\n\"~/.a\" = { src = \"a\" }\n", "unknown field"},
 		"[common]テーブルは拒否":   {"default_target = \"base\"\n[common.\"~/.a\"]\nsrc = \"a\"\n", "unknown field"},
-		"旧target配列は拒否":        {"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\ntarget = [\"win\"]\n", "unknown field"},
+		"旧target配列は拒否":      {"default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\ntarget = [\"win\"]\n", "unknown field"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -548,8 +548,8 @@ func TestLoadOverrideResolves(t *testing.T) {
 // Seam: config パッケージ公開境界 (override の検証エラー)
 func TestLoadOverrideValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"文字列は拒否":   "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\noverride = \"yes\"\n",
-		"数値は拒否":     "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\noverride = 1\n",
+		"文字列は拒否":     "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\noverride = \"yes\"\n",
+		"数値は拒否":      "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\noverride = 1\n",
 		"未知フィールドは拒否": "default_target = \"base\"\n[targets.base.\"~/.a\"]\nsrc = \"a\"\noverwride = false\n",
 	}
 	for name, body := range cases {
