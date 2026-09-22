@@ -44,12 +44,16 @@ mdots pull --dry-run
 
 # Store上で内容が一致するsrcを検出
 mdots doctor
+
+# sharable群を共有先に寄せる（shared_dir必須）
+mdots resolve
 ```
 
 ## 設定例（mdots.toml）
 
 ```toml
 default_target = "base"
+shared_dir = "dotfiles/shared"
 
 [targets.base."~/.vimrc"]
 src = "dotfiles/base/.vimrc"

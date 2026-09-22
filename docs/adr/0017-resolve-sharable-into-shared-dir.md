@@ -1,0 +1,3 @@
+# resolveでsharableを共有先に寄せる
+
+doctorの検出のみ方針（ADR-0016）を覆し、独立コマンドresolveでsharable群をshared_dir配下の共有先に寄せる自動修正を一括・非対話で行うことにした。doctorの既定動作（検出のみ）は変えず、共有基底は設定トップレベルのshared_dirに新設しresolve実行時のみ必須とする。事前検証で移動先の異内容が1件でもあれば設定とStoreファイルのいずれも変更せず、成功時はresolved一覧で報告する。

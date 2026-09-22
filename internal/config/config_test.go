@@ -376,7 +376,7 @@ func TestExpandDest(t *testing.T) {
 }
 
 // Seam: config パッケージ公開境界 (init 雛形作成)
-// default_target = "base" のみを持ち、コメント・例示は含まない。
+// default_target = "base" と shared_dir = "dotfiles/shared" を持ち、コメント・例示は含まない。
 // 生成物は Load を通り（Entry ゼロ件）、旧形式を含まない。
 func TestInitCreatesTemplate(t *testing.T) {
 	dir := t.TempDir()
@@ -389,7 +389,7 @@ func TestInitCreatesTemplate(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	body := string(data)
-	want := "default_target = \"base\"\n"
+	want := "default_target = \"base\"\nshared_dir = \"dotfiles/shared\"\n"
 	if body != want {
 		t.Errorf("template exact match failed:\ngot:\n%s\nwant:\n%s", body, want)
 	}
@@ -408,6 +408,9 @@ func TestInitCreatesTemplate(t *testing.T) {
 	}
 	if cfg.DefaultTarget != "base" {
 		t.Errorf("DefaultTarget = %q, want base", cfg.DefaultTarget)
+	}
+	if cfg.SharedDir != "dotfiles/shared" {
+		t.Errorf("SharedDir = %q, want dotfiles/shared", cfg.SharedDir)
 	}
 	if len(cfg.Targets()) != 0 {
 		t.Errorf("template should have zero entries, got Targets() = %q", cfg.Targets())

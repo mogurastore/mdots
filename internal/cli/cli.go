@@ -161,6 +161,12 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.doctorAction,
 			},
 			{
+				Name:   "resolve",
+				Usage:  "sharable群を共有先に寄せる",
+				Before: r.rejectExtraArgs(0),
+				Action: r.resolveAction,
+			},
+			{
 				Name:  "add",
 				Usage: "未登録の既存ファイルを新規Entryとして登録する",
 				Flags: []cliv3.Flag{
@@ -256,6 +262,13 @@ func (r *runner) targetsAction(_ context.Context, _ *cliv3.Command) error {
 
 func (r *runner) doctorAction(_ context.Context, _ *cliv3.Command) error {
 	if code := app.Doctor(r.cwd, r.stdout, r.stderr); code != 0 {
+		return &exitError{code: code}
+	}
+	return nil
+}
+
+func (r *runner) resolveAction(_ context.Context, _ *cliv3.Command) error {
+	if code := app.Resolve(r.cwd, r.stdout, r.stderr); code != 0 {
 		return &exitError{code: code}
 	}
 	return nil

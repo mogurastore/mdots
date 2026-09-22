@@ -54,3 +54,11 @@ Store直下でaddが生成する既定のsrc配置 (例: dotfiles/.vimrc)。必�
 **sharable**:
 別src間でStore上の内容が一致し共有化候補となる状態。destの異同は問わない。
 _Avoid_: duplicate
+
+**resolve**:
+sharable群を共有先に寄せる自動修正操作。
+_Avoid_: fix, apply
+
+**shared_dir**:
+resolveの移動先基底となるStore相対ディレクトリ。
+_Avoid_: shared, common dir

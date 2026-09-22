@@ -14,8 +14,11 @@ import (
 // Config は Store 直下の mdots.toml 全体を表す。
 // Entry は targets.<名>.<dest> のみに存在し、素の src 形式と [common] は持たない。
 // default_target は省略時の解決先を示す共有固定値である。
+// shared_dir は resolve の移動先基底となる Store 相対ディレクトリで、
+// resolve 実行時のみ必須とし、通常の doctor では無視する。
 type Config struct {
-	DefaultTarget string `toml:"default_target,omitempty"`
+	DefaultTarget string                            `toml:"default_target,omitempty"`
+	SharedDir     string                            `toml:"shared_dir,omitempty"`
 	TargetsMap    map[string]map[string]TargetValue `toml:"targets"`
 }
 
@@ -172,6 +175,7 @@ func rejectUnexpectedFormat(md toml.MetaData) error {
 // Validate は Target 名・配置先キー・src 必須・空を検証する。
 // 同一 Target 内の同一 dest 重複は TOML キー重複として構造上不可能なため検証しない。
 // 同一 dest の跨 Target 定義は許可する。default_target の欠落・空は解決時に扱いここでは許容する。
+// shared_dir は resolve 実行時のみ必須とするため、ここでは検証せず無視する。
 func (c Config) Validate() error {
 	for _, tname := range sortedKeys(c.TargetsMap) {
 		if tname == "" {
@@ -191,6 +195,94 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	return nil
+}
+
+// ValidateSharedDir は resolve 用の共有基底を検証し、正規化済みの値を返す。
+// 空・欠落は必須エラー、絶対パス・Store 外への脱出は相対エラーにする。
+// doctor では呼ばず無視する。
+func (c Config) ValidateSharedDir() (string, error) {
+	v := strings.TrimSpace(c.SharedDir)
+	if v == "" {
+		return "", fmt.Errorf("shared_dir is not set (hint: set shared_dir in mdots.toml)")
+	}
+	slash := filepath.ToSlash(v)
+	if filepath.IsAbs(v) || strings.HasPrefix(slash, "/") {
+		return "", fmt.Errorf("shared_dir must be a relative path: %q (hint: set Store-relative shared_dir in mdots.toml)", c.SharedDir)
+	}
+	if slash == "~" || strings.HasPrefix(slash, "~/") {
+		return "", fmt.Errorf("shared_dir must be a relative path: %q (hint: set Store-relative shared_dir in mdots.toml)", c.SharedDir)
+	}
+	parts := []string{}
+	for _, part := range strings.Split(slash, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if len(parts) == 0 {
+				return "", fmt.Errorf("shared_dir must not escape Store: %q (hint: set Store-relative shared_dir in mdots.toml)", c.SharedDir)
+			}
+			parts = parts[:len(parts)-1]
+			continue
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("shared_dir must not be empty (hint: set shared_dir in mdots.toml)")
+	}
+	return strings.Join(parts, "/"), nil
+}
+
+// SaveAtomic は設定全体の完成形を一時書出して再読込検証してから置換する。
+// mode は既存ファイルの権限を継承し、失敗時は元を不変に保つ。
+func SaveAtomic(path string, cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(cfg); err != nil {
+		return err
+	}
+	out := stripEmptyTableHeaders(buf.String())
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".mdots.toml.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(out); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if _, err := Load(tmpName); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	renamed = true
 	return nil
 }
 
@@ -224,10 +316,11 @@ func (e Entry) ExpandedDest() (string, error) {
 }
 
 // Template は init が作る mdots.toml 雛形である。
-// default_target = "base" のみを持ち、コメント・例示は含まない。
+// default_target = "base" と shared_dir = "dotfiles/shared" を持ち、コメント・例示は含まない。
 // base は予約語ではなく初期値例である。
 // 生成物は Load/Validate を通る（Entry ゼロ件）。
 const Template = `default_target = "base"
+shared_dir = "dotfiles/shared"
 `
 
 // Init は指定ディレクトリ直下に mdots.toml 雛形を作り、作ったパスを返す。
