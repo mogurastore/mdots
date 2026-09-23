@@ -121,15 +121,27 @@ func (r *runner) newCommand() *cliv3.Command {
 		ExitErrHandler: func(context.Context, *cliv3.Command, error) {},
 		Commands: []*cliv3.Command{
 			{
-				Name:  "push",
-				Usage: "Storeからdestへファイルをコピーする",
+				Name:  "add",
+				Usage: "未登録の既存ファイルを新規Entryとして登録する",
 				Flags: []cliv3.Flag{
 					targetFlag(),
-					dryRunFlag(),
-					colorFlag(),
 				},
+				// add は位置引数1件まで許容する。0件の不足は Action 側の
+				// 本質検査（missing argument）に残し、2件目以降だけ拒否する。
+				Before: r.rejectExtraArgs(1),
+				Action: r.addAction,
+			},
+			{
+				Name:   "doctor",
+				Usage:  "Store上で内容が一致するsrcを検出する",
 				Before: r.rejectExtraArgs(0),
-				Action: r.pushAction,
+				Action: r.doctorAction,
+			},
+			{
+				Name:   "init",
+				Usage:  "Storeにmdots.toml雛形を作る",
+				Before: r.rejectExtraArgs(0),
+				Action: r.initAction,
 			},
 			{
 				Name:  "pull",
@@ -143,16 +155,15 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.pullAction,
 			},
 			{
-				Name:   "init",
-				Usage:  "Storeにmdots.toml雛形を作る",
+				Name:  "push",
+				Usage: "Storeからdestへファイルをコピーする",
+				Flags: []cliv3.Flag{
+					targetFlag(),
+					dryRunFlag(),
+					colorFlag(),
+				},
 				Before: r.rejectExtraArgs(0),
-				Action: r.initAction,
-			},
-			{
-				Name:   "targets",
-				Usage:  "定義済みTarget名の一覧を表示する",
-				Before: r.rejectExtraArgs(0),
-				Action: r.targetsAction,
+				Action: r.pushAction,
 			},
 			{
 				Name:   "sort",
@@ -161,21 +172,10 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.sortAction,
 			},
 			{
-				Name:   "doctor",
-				Usage:  "Store上で内容が一致するsrcを検出する",
+				Name:   "targets",
+				Usage:  "定義済みTarget名の一覧を表示する",
 				Before: r.rejectExtraArgs(0),
-				Action: r.doctorAction,
-			},
-			{
-				Name:  "add",
-				Usage: "未登録の既存ファイルを新規Entryとして登録する",
-				Flags: []cliv3.Flag{
-					targetFlag(),
-				},
-				// add は位置引数1件まで許容する。0件の不足は Action 側の
-				// 本質検査（missing argument）に残し、2件目以降だけ拒否する。
-				Before: r.rejectExtraArgs(1),
-				Action: r.addAction,
+				Action: r.targetsAction,
 			},
 		},
 	}
