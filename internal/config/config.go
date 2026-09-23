@@ -490,3 +490,124 @@ func stripEmptyTableHeaders(out string) string {
 func isTableHeader(line string) bool {
 	return strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]")
 }
+
+// SortFile は mdots.toml を正規形にソートし、変更有無を返す。
+// 正規形は default_target 行（あれば）→空行1行→
+// [targets.<Target>.<dest>] を Target 名・dest の辞書順に空行1行区切りで
+// 並べた形で、末尾は単一改行である。追記と同じ書式（空親ヘッダなし・
+// インデントなし）に合わせるため、各 Entry は encodeSingleEntry で
+// fragment 化する。コメントは温存せず落とす。
+// 既に正規形なら書き換えず false を返す。mode を継承し、
+// 検証失敗時は元ファイルを不変に保つ。
+func SortFile(path string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		return false, err
+	}
+	sorted, err := cfg.marshalSorted()
+	if err != nil {
+		return false, err
+	}
+	if string(raw) == sorted {
+		return false, nil
+	}
+	if err := writeSortedAtomic(path, sorted); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// marshalSorted は Config を正規形の TOML 文字列にする。
+// default_target 空時はヘッダを出さず、Entry ゼロ件時はヘッダのみ
+// （または空文字）を返す。override は元の有無を保って出す。
+func (c Config) marshalSorted() (string, error) {
+	var b strings.Builder
+	if c.DefaultTarget != "" {
+		header, err := encodeDefaultTarget(c.DefaultTarget)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(header)
+	}
+	var frags []string
+	for _, target := range sortedKeys(c.TargetsMap) {
+		for _, dest := range sortedKeys(c.TargetsMap[target]) {
+			tv := c.TargetsMap[target][dest]
+			frag, err := encodeSingleEntry(map[string]map[string]TargetValue{target: {dest: tv}})
+			if err != nil {
+				return "", err
+			}
+			frags = append(frags, strings.TrimSuffix(frag, "\n"))
+		}
+	}
+	if len(frags) == 0 {
+		return b.String(), nil
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	for i, f := range frags {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(f)
+		b.WriteString("\n")
+	}
+	return b.String(), nil
+}
+
+// encodeDefaultTarget は default_target 行1行を TOML 引用で生成する。
+func encodeDefaultTarget(target string) (string, error) {
+	var buf bytes.Buffer
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(map[string]string{"default_target": target}); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// writeSortedAtomic は完成形を temp に書き、再 Load で検証してから
+// rename で atomic に置換する。元ファイルの mode を継承し
+// （取得不可時は0644）、失敗時は temp を削除して元を不変に保つ。
+func writeSortedAtomic(path, sorted string) error {
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".mdots.toml.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(sorted); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if _, err := Load(tmpName); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
+}

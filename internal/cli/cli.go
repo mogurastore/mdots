@@ -155,6 +155,12 @@ func (r *runner) newCommand() *cliv3.Command {
 				Action: r.targetsAction,
 			},
 			{
+				Name:   "sort",
+				Usage:  "mdots.tomlを正規形にソートする",
+				Before: r.rejectExtraArgs(0),
+				Action: r.sortAction,
+			},
+			{
 				Name:   "doctor",
 				Usage:  "Store上で内容が一致するsrcを検出する",
 				Before: r.rejectExtraArgs(0),
@@ -250,6 +256,14 @@ func (r *runner) targetsAction(_ context.Context, _ *cliv3.Command) error {
 	}
 	for _, name := range names {
 		fmt.Fprintln(r.stdout, name)
+	}
+	return nil
+}
+
+func (r *runner) sortAction(_ context.Context, _ *cliv3.Command) error {
+	if err := app.Sort(r.cwd); err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
 	}
 	return nil
 }
