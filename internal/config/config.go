@@ -27,7 +27,7 @@ type TargetValue struct {
 }
 
 // Entry は解決済みの1つの管理対象を表す src/dest ペア。
-// src は Store 相対のファイルパス、dest は ~ 展開される配置先パス。
+// src は Store 相対のファイルパス、dest は ~ / 環境変数展開される配置先パス。
 // Override は既存保護の解決結果で、false は既存を保護し新規作成のみ行う。
 type Entry struct {
 	Src      string `toml:"src"`
@@ -203,8 +203,26 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// ExpandDest は Entry の dest の ~ / ~/ を os.UserHomeDir() で展開する。
+// ExpandDest は Entry の dest を展開する。
+// "~" / "~/" は os.UserHomeDir() で展開する。
+// 環境変数 dest ($VAR、全体が変数参照のみ) は環境変数値で展開する。
+// 環境変数が未設定・空、値が絶対パスでない、形式が不正な場合はエラーを返す。
+// いずれにも当てはまらない dest はそのまま返す。
 func ExpandDest(dest string) (string, error) {
+	if strings.HasPrefix(dest, "$") {
+		name, err := envVarName(dest)
+		if err != nil {
+			return "", err
+		}
+		val := os.Getenv(name)
+		if val == "" {
+			return "", fmt.Errorf("dest env $%s is not set or empty: %q", name, dest)
+		}
+		if !filepath.IsAbs(val) {
+			return "", fmt.Errorf("dest env $%s must be an absolute path: %q", name, dest)
+		}
+		return val, nil
+	}
 	if dest != "~" && !strings.HasPrefix(dest, "~/") {
 		return dest, nil
 	}
@@ -216,6 +234,38 @@ func ExpandDest(dest string) (string, error) {
 		return home, nil
 	}
 	return filepath.Join(home, dest[2:]), nil
+}
+
+// envVarName は環境変数 dest ($VAR) から変数名を取り出す。
+// 全体が変数参照のみの場合に限り許容し、連結 ($VAR/rest 等) や
+// ${VAR} 形式はエラーにする。
+func envVarName(dest string) (string, error) {
+	name := dest[1:]
+	if !isEnvName(name) {
+		return "", fmt.Errorf("dest env name is invalid: %q", dest)
+	}
+	return name, nil
+}
+
+// isEnvName は環境変数名（[A-Za-z_][A-Za-z0-9_]*）かを報告する。
+func isEnvName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isEnvChar(s[i], i == 0) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// isEnvChar は環境変数名の1文字として有効かを報告する。
+func isEnvChar(c byte, first bool) bool {
+	if c == '_' || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') {
+		return true
+	}
+	if !first && '0' <= c && c <= '9' {
+		return true
+	}
+	return false
 }
 
 // ExpandedDest は Entry の dest を展開した配置先パスを返す。

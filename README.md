@@ -60,4 +60,7 @@ override = false
 
 [targets.wsl."~/.gitconfig"]
 src = "dotfiles/wsl/.gitconfig"
+
+[targets.base."$FOO"]
+src = "app.conf"
 ```

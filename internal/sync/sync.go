@@ -13,7 +13,7 @@ import (
 )
 
 // Push は Store の src を dest へファイルコピーする。
-// Entry の src は Store 相対、dest は ~ 展開される配置先パス。
+// Entry の src は Store 相対、dest は ~ / 環境変数展開される配置先パス。
 // 親ディレクトリは mkdir -p、パーミッションは元ファイルに追従。
 // override=false でコピー先に既存ファイルがある場合は上書きせず skip して継続し、
 // 不在時のみ新規作成する。省略時（true）は従来通り上書きする。
@@ -229,7 +229,7 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 }
 
 // Pull は dest を Store の src へファイルコピーする。
-// Entry の src は Store 相対、dest は ~ 展開される配置先パス。
+// Entry の src は Store 相対、dest は ~ / 環境変数展開される配置先パス。
 // Push と同じく親ディレクトリは mkdir -p、パーミッションは元ファイルに追従。
 // override=false で Store 側に既存ファイルがある場合は上書きせず skip して継続し、
 // 不在時のみ新規作成する。省略時（true）は従来通り上書きする。
