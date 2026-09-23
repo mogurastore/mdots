@@ -162,6 +162,18 @@ func Init(cwd string) error {
 	return err
 }
 
+// Sort は Store の mdots.toml を正規形にソートする。
+// 意味ソート（Load→正規形再生成）のためコメントは落とす。
+// 既に正規形なら書き換えない。成功時は無言で終える。
+func Sort(cwd string) error {
+	store, err := config.FindStore(cwd)
+	if err != nil {
+		return err
+	}
+	_, err = config.SortFile(filepath.Join(store, "mdots.toml"))
+	return err
+}
+
 // Targets は定義済みTarget名を重複排除・ソートし、既定 Target に印を付けて返す。
 // 印の書式は "<名> (default)" とする。Store不在・toml不正時はエラーを返す。
 func Targets(cwd string) ([]string, error) {
