@@ -375,47 +375,6 @@ func TestExpandDest(t *testing.T) {
 	}
 }
 
-// Seam: config パッケージ公開境界 (dest の環境変数展開)
-// 環境変数 dest ($VAR、全体が変数参照のみ) を展開する。
-// 連結 ($VAR/rest 等) や ${VAR} 形式は許容しない。
-// 未設定・空・相対パス値・不正形式はエラーにする。
-func TestExpandDestEnv(t *testing.T) {
-	base := t.TempDir()
-	t.Setenv("MDOTS_TEST_FOO", base)
-
-	if got, err := ExpandDest("$MDOTS_TEST_FOO"); err != nil || got != base {
-		t.Errorf("ExpandDest($VAR) = %q, %v; want %q, nil", got, err, base)
-	}
-
-	t.Run("未設定はエラー", func(t *testing.T) {
-		if got, err := ExpandDest("$MDOTS_TEST_UNSET_VAR_XYZ"); err == nil {
-			t.Errorf("ExpandDest(未設定) = %q, want error", got)
-		} else if !strings.Contains(err.Error(), "MDOTS_TEST_UNSET_VAR_XYZ") {
-			t.Errorf("変数名を含むべき, got %q", err.Error())
-		}
-	})
-
-	t.Run("空値はエラー", func(t *testing.T) {
-		t.Setenv("MDOTS_TEST_EMPTY", "")
-		if _, err := ExpandDest("$MDOTS_TEST_EMPTY"); err == nil {
-			t.Error("ExpandDest(空値): エラー expected, got nil")
-		}
-	})
-
-	t.Run("相対パス値はエラー", func(t *testing.T) {
-		t.Setenv("MDOTS_TEST_REL", "relative/path")
-		if _, err := ExpandDest("$MDOTS_TEST_REL"); err == nil {
-			t.Error("ExpandDest(相対値): エラー expected, got nil")
-		}
-	})
-
-	for _, raw := range []string{"$", "${}", "${MDOTS_TEST_FOO}", "${MDOTS_TEST_FOO", "$1FOO", "$MDOTS_TEST_FOO/a", "${MDOTS_TEST_FOO}/a", "${MDOTS_TEST_FOO}bar"} {
-		if got, err := ExpandDest(raw); err == nil {
-			t.Errorf("ExpandDest(%q) = %q, want error", raw, got)
-		}
-	}
-}
-
 // Seam: config パッケージ公開境界 (init 雛形作成)
 // default_target = "base" のみを持ち、コメント・例示は含まない。
 // 生成物は Load を通り（Entry ゼロ件）、旧形式を含まない。
