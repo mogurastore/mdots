@@ -9,7 +9,7 @@ mdots.toml を含む管理リポジトリのルート。カレント直下のmdo
 _Avoid_: repo, dotfiles repo
 
 **Entry**:
-1つの管理対象を表す src/dest ペア。srcはStore相対のファイルパス、destは~ / 環境変数展開される配置先パス。
+1つの管理対象を表す src/dest ペア。srcはStore相対のファイルパス、destは~展開される配置先パス。
 _Avoid_: mapping, rule
 
 **Target**:
