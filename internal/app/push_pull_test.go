@@ -597,3 +597,66 @@ func TestDryRunRepresentative(t *testing.T) {
 		}
 	})
 }
+
+// Seam: 実行系境界 (手書き登録の環境変数dest)
+// add は環境変数を扱わず、mdots.toml への手書き登録を想定する。
+// push/pull で先頭の単一変数のみ展開し、未設定時はエラーで中断する。
+func TestPushPullWithEnvDest(t *testing.T) {
+	toml := "default_target = \"base\"\n" +
+		"[targets.base.\"$MDOTS_E2E_DIR\"]\nsrc = \"app.conf\"\n"
+
+	t.Run("pushで展開してコピーする", func(t *testing.T) {
+		envFile := filepath.Join(t.TempDir(), "app.conf")
+		t.Setenv("MDOTS_E2E_DIR", envFile)
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"app.conf": "hello\n"},
+			nil,
+			toml,
+		)
+
+		if err := Push(store, "", io.Discard, io.Discard); err != nil {
+			t.Fatalf("Push error = %v, want nil", err)
+		}
+		got, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatalf("env dest read error: %v", err)
+		}
+		if string(got) != "hello\n" {
+			t.Errorf("env dest content = %q, want %q", got, "hello\n")
+		}
+	})
+
+	t.Run("pullで回収できる", func(t *testing.T) {
+		envFile := filepath.Join(t.TempDir(), "app.conf")
+		t.Setenv("MDOTS_E2E_DIR", envFile)
+		if err := os.WriteFile(envFile, []byte("edited\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		store, _ := setupStoreWithHome(t, nil, nil, toml)
+
+		if err := Pull(store, "", io.Discard, io.Discard); err != nil {
+			t.Fatalf("Pull error = %v, want nil", err)
+		}
+		got, err := os.ReadFile(filepath.Join(store, "app.conf"))
+		if err != nil {
+			t.Fatalf("store read error: %v", err)
+		}
+		if string(got) != "edited\n" {
+			t.Errorf("store content = %q, want %q", got, "edited\n")
+		}
+	})
+
+	t.Run("未設定時はエラーで中断する", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"app.conf": "hello\n"},
+			nil,
+			toml,
+		)
+
+		if err := Push(store, "", io.Discard, io.Discard); err == nil {
+			t.Fatal("Push with unset env: error = nil, want non-nil")
+		} else if !strings.Contains(err.Error(), "MDOTS_E2E_DIR") {
+			t.Errorf("変数名を含むべき, got %q", err.Error())
+		}
+	})
+}
