@@ -18,32 +18,38 @@ mise use github:mogurastore/mdots@latest
 # または GitHub Releases から OS/Arch に合うバイナリを取得
 ```
 
-## 使い方
+## 始め方
+
+現在の環境からStoreを作成する。
 
 ```sh
-# 設定ファイルを作る
+# 1. mdots.tomlを作る
 mdots init
 
-# 既存ファイルを新規Entryとして設定ファイルに登録する
+# 2. 管理したいファイルを登録する（登録だけでコピーはしない）
 mdots add ~/.vimrc
 
-# ファイルをコピー
+# 3. 差分を確認してからStoreに回収する（dest -> Store）
+mdots pull --dry-run
+mdots pull
+```
+
+別マシンではStoreをcloneして展開します。
+
+```sh
+# 差分を確認してから展開する（Store -> dest）
+mdots push --dry-run
 mdots push
+```
+
+日常の運用はこの繰り返しです。
+
+```sh
+# 編集したらStoreに取り込む
 mdots pull
 
-# Target付きで切り替え
-mdots push --target win
-mdots pull --target win
-
-# 定義済みTarget名の一覧を表示
-mdots targets
-
-# 差分を確認
-mdots push --dry-run
-mdots pull --dry-run
-
-# Store上で内容が一致するsrcを検出
-mdots doctor
+# Storeを更新したら各マシンに配る
+mdots push
 ```
 
 ## 設定例（mdots.toml）
