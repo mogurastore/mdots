@@ -34,7 +34,7 @@ mdots pull --dry-run
 mdots pull
 ```
 
-別マシンではStoreをcloneして展開します。
+Storeから環境へ展開します。
 
 ```sh
 # 差分を確認してから展開する（Store -> dest）
@@ -42,15 +42,29 @@ mdots push --dry-run
 mdots push
 ```
 
-日常の運用はこの繰り返しです。
+### 複数環境で使う場合
+
+同じ配置先を Target 別に分けて管理できます。
 
 ```sh
-# 編集したらStoreに取り込む
-mdots pull
+# Targetごとに登録・回収する
+mdots add --target win ~/.gitconfig
+mdots pull --target win
 
-# Storeを更新したら各マシンに配る
-mdots push
+mdots add --target wsl ~/.gitconfig
+mdots pull --target wsl
+
+# 定義済みTargetの一覧
+mdots targets
+
+# 環境に合わせて展開する
+mdots push --target wsl
 ```
+
+## その他の機能
+
+- 共有候補の検出: `doctor` で Store 上で内容が一致する src を検出
+- 設定の整理: `sort` で mdots.toml を正規形にソート
 
 ## 設定例（mdots.toml）
 
