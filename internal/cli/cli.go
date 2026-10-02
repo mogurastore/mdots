@@ -8,13 +8,18 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/mogurastore/mdots/internal/app"
 	cliv3 "github.com/urfave/cli/v3"
+	"golang.org/x/term"
 )
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -29,6 +34,8 @@ type runner struct {
 	cwd     string
 	stdout  io.Writer
 	stderr  io.Writer
+	stdin   io.Reader
+	isTTY   func() bool
 }
 
 // Run は CLI表面の入口である。args は os.Args[1:] 相当、cwd は実行ディレクトリ。
@@ -37,8 +44,31 @@ type runner struct {
 // 空値拒否は Flag.Validator、余剰引数拒否は Before に寄せる。
 // 位置引数の不足・--color依存など本質検査だけを Action 側に残す。
 func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
-	r := &runner{version: version, cwd: cwd, stdout: stdout, stderr: stderr}
+	r := &runner{
+		version: version,
+		cwd:     cwd,
+		stdout:  stdout,
+		stderr:  stderr,
+		stdin:   os.Stdin,
+		isTTY:   func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
+	}
 
+	return r.execute(args)
+}
+
+// RunWithStdin はテスト用に入力と端末判定を注入する入口である。
+func RunWithStdin(args []string, cwd, version string, stdout, stderr io.Writer, stdin io.Reader, isTTY func() bool) int {
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if isTTY == nil {
+		isTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	}
+	r := &runner{version: version, cwd: cwd, stdout: stdout, stderr: stderr, stdin: stdin, isTTY: isTTY}
+	return r.execute(args)
+}
+
+func (r *runner) execute(args []string) int {
 	cmd := r.newCommand()
 	if err := cmd.Run(context.Background(), append([]string{"mdots"}, args...)); err != nil {
 		var ee *exitError
@@ -50,7 +80,7 @@ func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
 			// unknown command 時の既定（No help topic、exit 3）。
 			// 枠組み既定の ExitErrHandler はグローバル ErrWriter に出すため、
 			// 注入先 stderr に出し直してテスト同一プロセス性を保つ。
-			fmt.Fprintln(stderr, ec.Error())
+			fmt.Fprintln(r.stderr, ec.Error())
 			return ec.ExitCode()
 		}
 		// フラグ解釈失敗時の既定（Incorrect Usage＋help）は枠組み側で
@@ -99,6 +129,12 @@ func colorFlag() cliv3.Flag {
 // dryRunFlag は --dry-run/-n の宣言である。push/pull で書き込まず差分を出力する。
 func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Aliases: []string{"n"}, Usage: "書き込まず差分を出力する"}
+}
+
+// interactiveFlag は --interactive/-i の宣言である。push/pull を専用モードで実行し、
+// Target選択とdry-run有無を対話で選ぶ。他オプション併記時は無視して専用モードを優先する。
+func interactiveFlag() cliv3.Flag {
+	return &cliv3.BoolFlag{Name: "interactive", Aliases: []string{"i"}, Usage: "対話でTargetとdry-runを選ぶ"}
 }
 
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
@@ -150,6 +186,7 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
+					interactiveFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pullAction,
@@ -161,6 +198,7 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
+					interactiveFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pushAction,
@@ -200,6 +238,9 @@ func (r *runner) rejectExtraArgs(max int) cliv3.BeforeFunc {
 }
 
 func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
+	if cmd.Bool("interactive") {
+		return r.runInteractive("push")
+	}
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
@@ -220,6 +261,9 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 }
 
 func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
+	if cmd.Bool("interactive") {
+		return r.runInteractive("pull")
+	}
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
@@ -237,6 +281,92 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		return &exitError{code: 1}
 	}
 	return nil
+}
+
+// runInteractive は push/pull の専用モードである。他オプション併記時は無視して
+// こちらを優先する。targets と同一ソースの一覧から番号選択し、dry-run有無を選んで実行する。
+func (r *runner) runInteractive(op string) error {
+	if !r.isTTY() {
+		fmt.Fprintln(r.stderr, "interactive requires a terminal")
+		return &exitError{code: 1}
+	}
+	names, err := app.Targets(r.cwd)
+	if err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(r.stderr, "no targets defined")
+		return &exitError{code: 1}
+	}
+	for i, name := range names {
+		fmt.Fprintf(r.stdout, "%d) %s\n", i+1, name)
+	}
+	target, dryRun, err := r.askInteractiveTarget(names)
+	if err != nil {
+		fmt.Fprintln(r.stderr, err)
+		return &exitError{code: 1}
+	}
+	if dryRun {
+		var code int
+		if op == "push" {
+			code = app.PushDryRun(r.cwd, target, "auto", r.stdout, r.stderr)
+		} else {
+			code = app.PullDryRun(r.cwd, target, "auto", r.stdout, r.stderr)
+		}
+		if code != 0 {
+			return &exitError{code: code}
+		}
+		return nil
+	}
+	var runErr error
+	if op == "push" {
+		runErr = app.Push(r.cwd, target, r.stdout, r.stderr)
+	} else {
+		runErr = app.Pull(r.cwd, target, r.stdout, r.stderr)
+	}
+	if runErr != nil {
+		fmt.Fprintln(r.stderr, runErr)
+		return &exitError{code: 1}
+	}
+	return nil
+}
+
+// askInteractiveTarget は番号選択とdry-run確認を行う。空入力は既定印へ解決する。
+// 戻り値のtargetは (default) 印を除いた素のTarget名である。
+func (r *runner) askInteractiveTarget(names []string) (string, bool, error) {
+	reader := bufio.NewReader(r.stdin)
+	defaultIdx := 0
+	for i, name := range names {
+		if strings.HasSuffix(name, " (default)") {
+			defaultIdx = i
+			break
+		}
+	}
+	fmt.Fprintf(r.stdout, "Select target [1-%d] (default %d): ", len(names), defaultIdx+1)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", false, err
+	}
+	line = strings.TrimSpace(line)
+	idx := defaultIdx
+	if line != "" {
+		n, convErr := strconv.Atoi(line)
+		if convErr != nil || n < 1 || n > len(names) {
+			return "", false, fmt.Errorf("invalid selection %q: choose 1-%d", line, len(names))
+		}
+		idx = n - 1
+	}
+	target := strings.TrimSuffix(names[idx], " (default)")
+
+	fmt.Fprint(r.stdout, "dry-run? [y/N]: ")
+	dryLine, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", false, err
+	}
+	dryLine = strings.ToLower(strings.TrimSpace(dryLine))
+	dryRun := dryLine == "y" || dryLine == "yes"
+	return target, dryRun, nil
 }
 
 func (r *runner) initAction(_ context.Context, _ *cliv3.Command) error {
