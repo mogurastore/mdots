@@ -159,7 +159,7 @@ func resolveEntries(cwd string, target string) (string, []config.Entry, error) {
 
 // reportSkipped は override=false による skip を警告として報告する。
 // 全体は成功（exit 0）で終える。報告先は呼び出し元から注入された stderr とする。
-// 文面は CONTEXT.md の override 用語に従い overwrite/force を避ける。
+// 文面は GLOSSARY.md の override 用語に従い overwrite/force を避ける。
 func reportSkipped(stderr io.Writer, skipped []config.Entry, op string) {
 	for _, s := range skipped {
 		fmt.Fprintf(stderr, "skipped: %s (override=false, %s would not override)\n", s.Dest, op)
