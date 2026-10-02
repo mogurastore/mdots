@@ -12,4 +12,4 @@ GitHub Issuesで管理（gh CLI）。See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-single-context（ルートの CONTEXT.md + docs/adr/）。See `docs/agents/domain.md`.
+single-context（ルートの GLOSSARY.md + docs/adr/）。See `docs/agents/domain.md`.
