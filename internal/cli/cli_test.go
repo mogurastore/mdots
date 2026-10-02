@@ -845,24 +845,12 @@ func TestCliAddHelp(t *testing.T) {
 	}
 }
 
-func TestCliAddRejectsMissingAndExtraArgs(t *testing.T) {
-	t.Run("引数なしは拒否", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
-		code, _, _ := runCli(t, store, []string{"add"})
-		if code == 0 {
-			t.Error("Run(add): exit = 0, want non-zero")
-		}
-	})
-	t.Run("余剰は拒否", func(t *testing.T) {
-		store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
-		code, _, errOut := runCli(t, store, []string{"add", "~/.a", "~/.b"})
-		if code == 0 {
-			t.Error("Run(add a b): exit = 0, want non-zero")
-		}
-		if !strings.Contains(errOut, "unknown argument: ~/.b") {
-			t.Errorf("stderr should contain unknown argument, got %q", errOut)
-		}
-	})
+func TestCliAddRejectsMissingArgs(t *testing.T) {
+	store, _ := setupStoreWithHome(t, nil, nil, "default_target = \"base\"\n")
+	code, _, _ := runCli(t, store, []string{"add"})
+	if code == 0 {
+		t.Error("Run(add): exit = 0, want non-zero")
+	}
 }
 
 // Seam: CLIコマンド境界 (add --target 登録)
@@ -925,6 +913,72 @@ func TestCliAddDuplicateError(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "already registered") {
 		t.Errorf("stderr should contain already registered, got %q", errOut)
+	}
+}
+
+// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
+func TestCliAddMultipleDispatchesInInputOrder(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "a\n", ".bashrc": "b\n"},
+		"default_target = \"base\"\n",
+	)
+	code, out, _ := runCli(t, store, []string{"add", "~/.vimrc", "~/.bashrc"})
+	if code != 0 {
+		t.Fatalf("Run(add a b) exit = %d, want 0", code)
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output should be 2 lines, got %q", out)
+	}
+	if !strings.Contains(lines[0], "~/.vimrc") || !strings.Contains(lines[1], "~/.bashrc") {
+		t.Errorf("output should preserve input order, got %q", out)
+	}
+	body, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	if !strings.Contains(string(body), "~/.vimrc") || !strings.Contains(string(body), "~/.bashrc") {
+		t.Errorf("mdots.toml should contain both entries, got:\n%s", body)
+	}
+}
+
+func TestCliAddMultipleAtomicOnPartialFailure(t *testing.T) {
+	// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "a\n"},
+		"default_target = \"base\"\n",
+	)
+	before, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc", "~/.missing"})
+	if code == 0 {
+		t.Fatal("Run(add ok missing): exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "~/.missing") {
+		t.Errorf("stderr should contain failing dest, got %q", errOut)
+	}
+	after, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	if string(before) != string(after) {
+		t.Errorf("mdots.toml must be unchanged on partial failure:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestCliAddMultipleDuplicateWithinArgs(t *testing.T) {
+	// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "a\n"},
+		"default_target = \"base\"\n",
+	)
+	before, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc", "~/.vimrc"})
+	if code == 0 {
+		t.Fatal("Run(add dup dup): exit = 0, want non-zero")
+	}
+	if !strings.Contains(errOut, "duplicate") {
+		t.Errorf("stderr should contain duplicate, got %q", errOut)
+	}
+	after, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
+	if string(before) != string(after) {
+		t.Errorf("mdots.toml must be unchanged on duplicate args:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 

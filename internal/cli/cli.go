@@ -121,14 +121,14 @@ func (r *runner) newCommand() *cliv3.Command {
 		ExitErrHandler: func(context.Context, *cliv3.Command, error) {},
 		Commands: []*cliv3.Command{
 			{
-				Name:  "add",
-				Usage: "未登録の既存ファイルを新規Entryとして登録する",
+				Name:      "add",
+				Usage:     "未登録の既存ファイルを新規Entryとして登録する",
+				ArgsUsage: "[--target <name>] <dest>...",
 				Flags: []cliv3.Flag{
 					targetFlag(),
 				},
-				// add は位置引数1件まで許容する。0件の不足は Action 側の
-				// 本質検査（missing argument）に残し、2件目以降だけ拒否する。
-				Before: r.rejectExtraArgs(1),
+				// add は複数位置引数を受け付ける。0件の不足は Action 側の
+				// 本質検査（missing argument）に残す。
 				Action: r.addAction,
 			},
 			{
@@ -281,13 +281,15 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "missing argument")
 		return &exitError{code: 1}
 	}
-	dest := args.First()
+	dests := args.Slice()
 	target := cmd.String("target")
-	key, src, resolved, err := app.Add(r.cwd, dest, target)
+	results, err := app.AddMultiple(r.cwd, dests, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
-	fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", key, resolved, src)
+	for _, res := range results {
+		fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", res.Key, res.Resolved, res.Src)
+	}
 	return nil
 }

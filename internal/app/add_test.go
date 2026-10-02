@@ -299,3 +299,39 @@ func TestAddWithoutStoreFails(t *testing.T) {
 		t.Errorf("error should contain not-found error, got %q", err.Error())
 	}
 }
+
+// Seam: 実行系境界 (add 複数登録・all-or-nothing)
+func TestAddMultipleRegistersInInputOrder(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "a\n", ".bashrc": "b\n"},
+		"default_target = \"base\"\n",
+	)
+	results, err := AddMultiple(store, []string{"~/.vimrc", "~/.bashrc"}, "")
+	if err != nil {
+		t.Fatalf("AddMultiple error = %v, want nil", err)
+	}
+	if len(results) != 2 || results[0].Key != "~/.vimrc" || results[1].Key != "~/.bashrc" {
+		t.Fatalf("results should preserve input order, got %+v", results)
+	}
+	body := readTomlForAddTest(t, store)
+	if !strings.Contains(body, "~/.vimrc") || !strings.Contains(body, "~/.bashrc") {
+		t.Errorf("mdots.toml should contain both entries, got:\n%s", body)
+	}
+}
+
+func TestAddMultipleAtomicOnPartialFailure(t *testing.T) {
+	// Seam: 実行系境界 (add 複数登録・all-or-nothing)
+	store, _ := setupStoreWithHome(t,
+		nil,
+		map[string]string{".vimrc": "a\n"},
+		"default_target = \"base\"\n",
+	)
+	before := readTomlForAddTest(t, store)
+	if _, err := AddMultiple(store, []string{"~/.vimrc", "~/.missing"}, ""); err == nil {
+		t.Fatal("AddMultiple(ok, missing): error = nil, want non-nil")
+	}
+	if got := readTomlForAddTest(t, store); got != before {
+		t.Errorf("mdots.toml must be unchanged on partial failure:\nbefore:\n%s\ngot:\n%s", before, got)
+	}
+}
