@@ -15,7 +15,7 @@ import (
 // Entry は targets.<名>.<dest> のみに存在し、素の src 形式と [common] は持たない。
 // default_target は省略時の解決先を示す共有固定値である。
 type Config struct {
-	DefaultTarget string `toml:"default_target,omitempty"`
+	DefaultTarget string                            `toml:"default_target,omitempty"`
 	TargetsMap    map[string]map[string]TargetValue `toml:"targets"`
 }
 
