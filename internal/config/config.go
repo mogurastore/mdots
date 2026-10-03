@@ -372,46 +372,6 @@ func AppendTargetEntry(path, dest, target, src string) error {
 	return appendSingleEntry(path, entry)
 }
 
-// AppendTargetEntries は同一 Target への複数 dest を1回の atomic 置換で追記する。
-// 入力順を保持するため dest ごとに fragment 化して結合し、一括で検証・置換する。
-// 失敗時は元ファイルを不変に保つ。
-func AppendTargetEntries(path, target string, pairs []DestSrc) error {
-	if target == "" {
-		return fmt.Errorf("targets[%q]: target must not be empty", target)
-	}
-	if len(pairs) == 0 {
-		return fmt.Errorf("targets[%q]: dest must not be empty", target)
-	}
-	var b strings.Builder
-	for _, p := range pairs {
-		if p.Dest == "" {
-			return fmt.Errorf("targets[%q][%q]: dest must not be empty", target, p.Dest)
-		}
-		if p.Src == "" {
-			return fmt.Errorf("targets[%q][%q]: src is required", target, p.Dest)
-		}
-		srcCopy := p.Src
-		entry := map[string]map[string]TargetValue{target: {p.Dest: {Src: &srcCopy}}}
-		fragment, err := encodeSingleEntry(entry)
-		if err != nil {
-			return err
-		}
-		fragment = strings.TrimSuffix(fragment, "\n")
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(fragment)
-	}
-	b.WriteString("\n")
-	return appendFragmentAtomic(path, b.String())
-}
-
-// DestSrc は追記する配置先キーと Store 相対 src のペアである。
-type DestSrc struct {
-	Dest string
-	Src  string
-}
-
 // appendSingleEntry は1 Entry分のfragment化と追記＋検証＋置換を一本化する。
 func appendSingleEntry(path string, entry map[string]map[string]TargetValue) error {
 	fragment, err := encodeSingleEntry(entry)

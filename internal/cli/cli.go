@@ -8,18 +8,13 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/mogurastore/mdots/internal/app"
 	cliv3 "github.com/urfave/cli/v3"
-	"golang.org/x/term"
 )
 
 // exitError は Action が呼び出し元 Run へ exit code を伝えるための内用エラーで、
@@ -34,8 +29,6 @@ type runner struct {
 	cwd     string
 	stdout  io.Writer
 	stderr  io.Writer
-	stdin   io.Reader
-	isTTY   func() bool
 }
 
 // Run は CLI表面の入口である。args は os.Args[1:] 相当、cwd は実行ディレクトリ。
@@ -49,22 +42,8 @@ func Run(args []string, cwd, version string, stdout, stderr io.Writer) int {
 		cwd:     cwd,
 		stdout:  stdout,
 		stderr:  stderr,
-		stdin:   os.Stdin,
-		isTTY:   func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
 	}
 
-	return r.execute(args)
-}
-
-// RunWithStdin はテスト用に入力と端末判定を注入する入口である。
-func RunWithStdin(args []string, cwd, version string, stdout, stderr io.Writer, stdin io.Reader, isTTY func() bool) int {
-	if stdin == nil {
-		stdin = os.Stdin
-	}
-	if isTTY == nil {
-		isTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
-	}
-	r := &runner{version: version, cwd: cwd, stdout: stdout, stderr: stderr, stdin: stdin, isTTY: isTTY}
 	return r.execute(args)
 }
 
@@ -131,12 +110,6 @@ func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Aliases: []string{"n"}, Usage: "書き込まず差分を出力する"}
 }
 
-// interactiveFlag は --interactive/-i の宣言である。push/pull を専用モードで実行し、
-// Target選択とdry-run有無を対話で選ぶ。他オプション併記時は無視して専用モードを優先する。
-func interactiveFlag() cliv3.Flag {
-	return &cliv3.BoolFlag{Name: "interactive", Aliases: []string{"i"}, Usage: "対話でTargetとdry-runを選ぶ"}
-}
-
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
 // 枠組み既定に任せ、--target の定義だけを宣言する。
 // フラグ解釈失敗時（未知フラグ・値なし・Validator拒否）は OnUsageError 既定（nil）の
@@ -159,12 +132,11 @@ func (r *runner) newCommand() *cliv3.Command {
 			{
 				Name:      "add",
 				Usage:     "未登録の既存ファイルを新規Entryとして登録する",
-				ArgsUsage: "[--target <name>] <dest>...",
+				ArgsUsage: "[--target <name>] <dest>",
 				Flags: []cliv3.Flag{
 					targetFlag(),
 				},
-				// add は複数位置引数を受け付ける。0件の不足は Action 側の
-				// 本質検査（missing argument）に残す。
+				Before: r.rejectExtraArgs(1),
 				Action: r.addAction,
 			},
 			{
@@ -186,7 +158,6 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
-					interactiveFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pullAction,
@@ -198,7 +169,6 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
-					interactiveFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pushAction,
@@ -238,9 +208,6 @@ func (r *runner) rejectExtraArgs(max int) cliv3.BeforeFunc {
 }
 
 func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
-	if cmd.Bool("interactive") {
-		return r.runInteractive("push")
-	}
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
@@ -261,9 +228,6 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 }
 
 func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
-	if cmd.Bool("interactive") {
-		return r.runInteractive("pull")
-	}
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
@@ -281,92 +245,6 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 		return &exitError{code: 1}
 	}
 	return nil
-}
-
-// runInteractive は push/pull の専用モードである。他オプション併記時は無視して
-// こちらを優先する。targets と同一ソースの一覧から番号選択し、dry-run有無を選んで実行する。
-func (r *runner) runInteractive(op string) error {
-	if !r.isTTY() {
-		fmt.Fprintln(r.stderr, "interactive requires a terminal")
-		return &exitError{code: 1}
-	}
-	names, err := app.Targets(r.cwd)
-	if err != nil {
-		fmt.Fprintln(r.stderr, err)
-		return &exitError{code: 1}
-	}
-	if len(names) == 0 {
-		fmt.Fprintln(r.stderr, "no targets defined")
-		return &exitError{code: 1}
-	}
-	for i, name := range names {
-		fmt.Fprintf(r.stdout, "%d) %s\n", i+1, name)
-	}
-	target, dryRun, err := r.askInteractiveTarget(names)
-	if err != nil {
-		fmt.Fprintln(r.stderr, err)
-		return &exitError{code: 1}
-	}
-	if dryRun {
-		var code int
-		if op == "push" {
-			code = app.PushDryRun(r.cwd, target, "auto", r.stdout, r.stderr)
-		} else {
-			code = app.PullDryRun(r.cwd, target, "auto", r.stdout, r.stderr)
-		}
-		if code != 0 {
-			return &exitError{code: code}
-		}
-		return nil
-	}
-	var runErr error
-	if op == "push" {
-		runErr = app.Push(r.cwd, target, r.stdout, r.stderr)
-	} else {
-		runErr = app.Pull(r.cwd, target, r.stdout, r.stderr)
-	}
-	if runErr != nil {
-		fmt.Fprintln(r.stderr, runErr)
-		return &exitError{code: 1}
-	}
-	return nil
-}
-
-// askInteractiveTarget は番号選択とdry-run確認を行う。空入力は既定印へ解決する。
-// 戻り値のtargetは (default) 印を除いた素のTarget名である。
-func (r *runner) askInteractiveTarget(names []string) (string, bool, error) {
-	reader := bufio.NewReader(r.stdin)
-	defaultIdx := 0
-	for i, name := range names {
-		if strings.HasSuffix(name, " (default)") {
-			defaultIdx = i
-			break
-		}
-	}
-	fmt.Fprintf(r.stdout, "Select target [1-%d] (default %d): ", len(names), defaultIdx+1)
-	line, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", false, err
-	}
-	line = strings.TrimSpace(line)
-	idx := defaultIdx
-	if line != "" {
-		n, convErr := strconv.Atoi(line)
-		if convErr != nil || n < 1 || n > len(names) {
-			return "", false, fmt.Errorf("invalid selection %q: choose 1-%d", line, len(names))
-		}
-		idx = n - 1
-	}
-	target := strings.TrimSuffix(names[idx], " (default)")
-
-	fmt.Fprint(r.stdout, "dry-run? [y/N]: ")
-	dryLine, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", false, err
-	}
-	dryLine = strings.ToLower(strings.TrimSpace(dryLine))
-	dryRun := dryLine == "y" || dryLine == "yes"
-	return target, dryRun, nil
 }
 
 func (r *runner) initAction(_ context.Context, _ *cliv3.Command) error {
@@ -411,15 +289,13 @@ func (r *runner) addAction(_ context.Context, cmd *cliv3.Command) error {
 		fmt.Fprintln(r.stderr, "missing argument")
 		return &exitError{code: 1}
 	}
-	dests := args.Slice()
+	dest := args.First()
 	target := cmd.String("target")
-	results, err := app.AddMultiple(r.cwd, dests, target)
+	key, src, resolved, err := app.Add(r.cwd, dest, target)
 	if err != nil {
 		fmt.Fprintln(r.stderr, err)
 		return &exitError{code: 1}
 	}
-	for _, res := range results {
-		fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", res.Key, res.Resolved, res.Src)
-	}
+	fmt.Fprintf(r.stdout, "added %s (target: %s, src: %s)\n", key, resolved, src)
 	return nil
 }

@@ -313,10 +313,10 @@ func TestCliCommandHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color", "--interactive"}},
-		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color", "--interactive"}},
-		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color", "--interactive"}},
-		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color", "--interactive"}},
+		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
+		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
 	}
 	for _, tt := range tests {
 		code, out, _ := runCliEmpty(t, tt.args)
@@ -916,69 +916,24 @@ func TestCliAddDuplicateError(t *testing.T) {
 	}
 }
 
-// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
-func TestCliAddMultipleDispatchesInInputOrder(t *testing.T) {
+// Seam: CLIコマンド境界 (add 単発・余剰引数拒否)
+func TestCliAddRejectsExtraArgs(t *testing.T) {
 	store, _ := setupStoreWithHome(t,
 		nil,
 		map[string]string{".vimrc": "a\n", ".bashrc": "b\n"},
 		"default_target = \"base\"\n",
 	)
-	code, out, _ := runCli(t, store, []string{"add", "~/.vimrc", "~/.bashrc"})
-	if code != 0 {
-		t.Fatalf("Run(add a b) exit = %d, want 0", code)
-	}
-	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("output should be 2 lines, got %q", out)
-	}
-	if !strings.Contains(lines[0], "~/.vimrc") || !strings.Contains(lines[1], "~/.bashrc") {
-		t.Errorf("output should preserve input order, got %q", out)
-	}
-	body, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
-	if !strings.Contains(string(body), "~/.vimrc") || !strings.Contains(string(body), "~/.bashrc") {
-		t.Errorf("mdots.toml should contain both entries, got:\n%s", body)
-	}
-}
-
-func TestCliAddMultipleAtomicOnPartialFailure(t *testing.T) {
-	// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
-	store, _ := setupStoreWithHome(t,
-		nil,
-		map[string]string{".vimrc": "a\n"},
-		"default_target = \"base\"\n",
-	)
 	before, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
-	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc", "~/.missing"})
+	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc", "~/.bashrc"})
 	if code == 0 {
-		t.Fatal("Run(add ok missing): exit = 0, want non-zero")
+		t.Fatal("Run(add a b): exit = 0, want non-zero")
 	}
-	if !strings.Contains(errOut, "~/.missing") {
-		t.Errorf("stderr should contain failing dest, got %q", errOut)
+	if !strings.Contains(errOut, "unknown argument: ~/.bashrc") {
+		t.Errorf("stderr should contain unknown argument, got %q", errOut)
 	}
 	after, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
 	if string(before) != string(after) {
-		t.Errorf("mdots.toml must be unchanged on partial failure:\nbefore:\n%s\nafter:\n%s", before, after)
-	}
-}
-
-func TestCliAddMultipleDuplicateWithinArgs(t *testing.T) {
-	// Seam: CLIコマンド境界 (add 複数登録・all-or-nothing)
-	store, _ := setupStoreWithHome(t,
-		nil,
-		map[string]string{".vimrc": "a\n"},
-		"default_target = \"base\"\n",
-	)
-	before, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
-	code, _, errOut := runCli(t, store, []string{"add", "~/.vimrc", "~/.vimrc"})
-	if code == 0 {
-		t.Fatal("Run(add dup dup): exit = 0, want non-zero")
-	}
-	if !strings.Contains(errOut, "duplicate") {
-		t.Errorf("stderr should contain duplicate, got %q", errOut)
-	}
-	after, _ := os.ReadFile(filepath.Join(store, "mdots.toml"))
-	if string(before) != string(after) {
-		t.Errorf("mdots.toml must be unchanged on duplicate args:\nbefore:\n%s\nafter:\n%s", before, after)
+		t.Errorf("mdots.toml must be unchanged on extra args:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 

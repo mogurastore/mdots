@@ -770,31 +770,6 @@ func TestAppendInsertsBlankLineSeparator(t *testing.T) {
 	})
 }
 
-// Seam: config パッケージ公開境界 (add向け複数追記の空行区切り)
-func TestAppendEntriesInsertsSingleBlankLineSeparators(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "mdots.toml")
-	before := "default_target = \"base\"\n"
-	if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	pairs := []DestSrc{
-		{Dest: "~/.vimrc", Src: "dotfiles/base/.vimrc"},
-		{Dest: "~/.bashrc", Src: "dotfiles/base/.bashrc"},
-	}
-	if err := AppendTargetEntries(p, "base", pairs); err != nil {
-		t.Fatalf("Append error: %v", err)
-	}
-	got := readFileForTest(t, p)
-	want := before + "\n[targets.base.\"~/.vimrc\"]\nsrc = \"dotfiles/base/.vimrc\"\n\n[targets.base.\"~/.bashrc\"]\nsrc = \"dotfiles/base/.bashrc\"\n"
-	if got != want {
-		t.Errorf("複数追記の空行区切り失敗:\ngot:\n%q\nwant:\n%q", got, want)
-	}
-	if strings.Contains(got, "\n\n\n") {
-		t.Errorf("空行2行の重複あり:\ngot:\n%q", got)
-	}
-}
-
 // Seam: config パッケージ公開境界 (add向け追記記法)
 func TestAppendExactFormat(t *testing.T) {
 	dir := t.TempDir()
