@@ -33,7 +33,7 @@ Storeにmdots.toml雛形を作る操作。
 _Avoid_: create, new, setup
 
 **add**:
-未登録の既存ファイルを新規Entryとして登録する操作。取り込みはpullが行う。
+未登録の既存ファイルを新規Entryとして1件のみ登録する操作。2件目以降は受け付けない。取り込みはpullが行う。
 _Avoid_: import, capture
 
 **targets**:

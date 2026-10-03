@@ -5,7 +5,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,111 +13,6 @@ import (
 	"github.com/mogurastore/mdots/internal/config"
 	"github.com/mogurastore/mdots/internal/sync"
 )
-
-// AddResult は1件分の登録結果である。
-type AddResult struct {
-	Key      string
-	Src      string
-	Resolved string
-}
-
-// AddMultiple は複数の未登録ファイルを新規Entryとして一括登録する。
-// 全件事前検証→一括追記の all-or-nothing とし、1件でもNGなら
-// mdots.tomlを変更せずNG全件を結合エラーで返す。
-// 単一 target を全件に適用し、成功時は入力順に結果を返す。
-// ファイルのコピーは行わない。回収は pull が行う。
-func AddMultiple(cwd string, rawDests []string, target string) ([]AddResult, error) {
-	if len(rawDests) == 0 {
-		return nil, fmt.Errorf("missing argument")
-	}
-	store, err := config.FindStore(cwd)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
-	if err != nil {
-		return nil, err
-	}
-	resolved := target
-	if resolved == "" {
-		if cfg.DefaultTarget == "" {
-			return nil, fmt.Errorf("default_target is not set (hint: set default_target or use --target; check targets in mdots.toml)")
-		}
-		resolved = cfg.DefaultTarget
-	}
-	type validated struct {
-		key string
-		src string
-	}
-	validatedList := make([]validated, 0, len(rawDests))
-	seen := make(map[string]struct{}, len(rawDests))
-	var errs []error
-	for _, raw := range rawDests {
-		key, err := config.NormalizeDest(raw)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("add %s: %w", raw, err))
-			continue
-		}
-		if _, dup := seen[key]; dup {
-			errs = append(errs, fmt.Errorf("add %s: duplicate argument: %s", key, raw))
-			continue
-		}
-		seen[key] = struct{}{}
-		src, err := config.SrcForDestWithTarget(key, resolved)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("add %s: %w", key, err))
-			continue
-		}
-		destPath, err := config.ExpandDest(key)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("add %s: %w", key, err))
-			continue
-		}
-		destInfo, destErr := os.Stat(destPath)
-		if destErr != nil {
-			errs = append(errs, fmt.Errorf("add %s: %w", key, destErr))
-			continue
-		}
-		if destInfo.IsDir() {
-			errs = append(errs, fmt.Errorf("add %s: dest is a directory: %s", key, destPath))
-			continue
-		}
-		srcPath := filepath.Join(store, src)
-		if srcInfo, srcErr := os.Stat(srcPath); srcErr == nil {
-			if srcInfo.IsDir() {
-				errs = append(errs, fmt.Errorf("add %s: src is a directory: %s", key, src))
-			} else {
-				errs = append(errs, fmt.Errorf("add %s: src already exists in Store: %s", key, src))
-			}
-			continue
-		} else if !os.IsNotExist(srcErr) {
-			errs = append(errs, fmt.Errorf("add %s: %w", key, srcErr))
-			continue
-		}
-		if dests, ok := cfg.TargetsMap[resolved]; ok {
-			if _, ok := dests[key]; ok {
-				errs = append(errs, fmt.Errorf("add %s: targets[%q][%q]: already registered", key, resolved, key))
-				continue
-			}
-		}
-		validatedList = append(validatedList, validated{key: key, src: src})
-	}
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
-	}
-	pairs := make([]config.DestSrc, 0, len(validatedList))
-	for _, v := range validatedList {
-		pairs = append(pairs, config.DestSrc{Dest: v.key, Src: v.src})
-	}
-	if err := config.AppendTargetEntries(filepath.Join(store, "mdots.toml"), resolved, pairs); err != nil {
-		return nil, err
-	}
-	results := make([]AddResult, 0, len(validatedList))
-	for _, v := range validatedList {
-		results = append(results, AddResult{Key: v.key, Src: v.src, Resolved: resolved})
-	}
-	return results, nil
-}
 
 // Add は未登録の既存ファイルを新規Entryとして登録する。
 // Store発見（カレント直下のみ）→dest正規化→Target解決→src算出→Load→意味検査→
@@ -131,11 +25,61 @@ func AddMultiple(cwd string, rawDests []string, target string) ([]AddResult, err
 // override は書かない（省略時 true として解決される）。
 // 戻り値は配置先キー・Store相対src・解決先Targetである。
 func Add(cwd, rawDest, target string) (string, string, string, error) {
-	results, err := AddMultiple(cwd, []string{rawDest}, target)
+	if rawDest == "" {
+		return "", "", "", fmt.Errorf("missing argument")
+	}
+	store, err := config.FindStore(cwd)
 	if err != nil {
 		return "", "", "", err
 	}
-	return results[0].Key, results[0].Src, results[0].Resolved, nil
+	cfg, err := config.Load(filepath.Join(store, "mdots.toml"))
+	if err != nil {
+		return "", "", "", err
+	}
+	resolved := target
+	if resolved == "" {
+		if cfg.DefaultTarget == "" {
+			return "", "", "", fmt.Errorf("default_target is not set (hint: set default_target or use --target; check targets in mdots.toml)")
+		}
+		resolved = cfg.DefaultTarget
+	}
+	key, err := config.NormalizeDest(rawDest)
+	if err != nil {
+		return "", "", "", fmt.Errorf("add %s: %w", rawDest, err)
+	}
+	src, err := config.SrcForDestWithTarget(key, resolved)
+	if err != nil {
+		return "", "", "", fmt.Errorf("add %s: %w", key, err)
+	}
+	destPath, err := config.ExpandDest(key)
+	if err != nil {
+		return "", "", "", fmt.Errorf("add %s: %w", key, err)
+	}
+	destInfo, destErr := os.Stat(destPath)
+	if destErr != nil {
+		return "", "", "", fmt.Errorf("add %s: %w", key, destErr)
+	}
+	if destInfo.IsDir() {
+		return "", "", "", fmt.Errorf("add %s: dest is a directory: %s", key, destPath)
+	}
+	srcPath := filepath.Join(store, src)
+	if srcInfo, srcErr := os.Stat(srcPath); srcErr == nil {
+		if srcInfo.IsDir() {
+			return "", "", "", fmt.Errorf("add %s: src is a directory: %s", key, src)
+		}
+		return "", "", "", fmt.Errorf("add %s: src already exists in Store: %s", key, src)
+	} else if !os.IsNotExist(srcErr) {
+		return "", "", "", fmt.Errorf("add %s: %w", key, srcErr)
+	}
+	if dests, ok := cfg.TargetsMap[resolved]; ok {
+		if _, ok := dests[key]; ok {
+			return "", "", "", fmt.Errorf("add %s: targets[%q][%q]: already registered", key, resolved, key)
+		}
+	}
+	if err := config.AppendTargetEntry(filepath.Join(store, "mdots.toml"), key, resolved, src); err != nil {
+		return "", "", "", err
+	}
+	return key, src, resolved, nil
 }
 
 // resolveEntries は Store 発見・設定読込・Target 解決をまとめて行い、
