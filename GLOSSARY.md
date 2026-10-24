@@ -44,6 +44,10 @@ _Avoid_: list
 push/pullで書き込まず差分を出力する操作。方向は操作のコピー方向に合わせる。
 _Avoid_: diff, preview
 
+**stat**:
+dry-runでpatchの代わりにファイル別の変更行数と集計行を表示する出力形式。ラベルは差分のnew側（pushはsrc、pullはdest）を使う。
+_Avoid_: numstat, summary
+
 **override**:
 Entryのコピー先に既存ファイルがある場合の上書き可否。falseは既存を保護し新規作成のみ行う。
 _Avoid_: overwrite, force
