@@ -313,10 +313,10 @@ func TestCliCommandHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
-		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color"}},
-		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
-		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color"}},
+		{[]string{"push", "--help"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color", "--stat"}},
+		{[]string{"push", "-h"}, []string{"USAGE:", "OPTIONS:", "push", "--target", "--dry-run", "--color", "--stat"}},
+		{[]string{"pull", "--help"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color", "--stat"}},
+		{[]string{"pull", "-h"}, []string{"USAGE:", "OPTIONS:", "pull", "--target", "--dry-run", "--color", "--stat"}},
 	}
 	for _, tt := range tests {
 		code, out, _ := runCliEmpty(t, tt.args)
@@ -1018,4 +1018,80 @@ func TestCliDoctorHelp(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Seam: CLIコマンド境界 (--dry-run --stat の配線・help・必須エラー)
+func TestCliDryRunStat(t *testing.T) {
+	t.Run("pushはファイル別集計を出してpatchを出さない", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "new\n"},
+			map[string]string{".vimrc": "old\n"},
+			singleBaseToml(),
+		)
+		code, out, errOut := runCli(t, store, []string{"push", "--dry-run", "--stat"})
+		if code != 1 {
+			t.Fatalf("Run(push --dry-run --stat) exit = %d, want 1 (stderr=%q)", code, errOut)
+		}
+		for _, want := range []string{" vimrc | 2 +-", " 1 file changed, 1 insertion(+), 1 deletion(-)"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stdout should contain %q, got %q", want, out)
+			}
+		}
+		if strings.Contains(out, "---") {
+			t.Errorf("stat must not contain patch headers, got %q", out)
+		}
+		if got, err := os.ReadFile(filepath.Join(store, "vimrc")); err != nil || string(got) != "new\n" {
+			t.Error("Store must NOT be written on dry-run --stat")
+		}
+	})
+
+	t.Run("pullはファイル別集計を出す", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "old\n"},
+			map[string]string{".vimrc": "new\n"},
+			singleBaseToml(),
+		)
+		code, out, _ := runCli(t, store, []string{"pull", "--dry-run", "--stat"})
+		if code != 1 {
+			t.Fatalf("Run(pull --dry-run --stat) exit = %d, want 1", code)
+		}
+		if !strings.Contains(out, ".vimrc | 2 +-") {
+			t.Errorf("stdout should contain stat line, got %q", out)
+		}
+	})
+
+	t.Run("差分なしはNo changes", func(t *testing.T) {
+		store, _ := setupStoreWithHome(t,
+			map[string]string{"vimrc": "same\n"},
+			map[string]string{".vimrc": "same\n"},
+			singleBaseToml(),
+		)
+		code, out, _ := runCli(t, store, []string{"push", "--dry-run", "--stat"})
+		if code != 0 {
+			t.Fatalf("Run(push --dry-run --stat) exit = %d, want 0", code)
+		}
+		if out != "No changes.\n" {
+			t.Errorf("stdout = %q, want No changes.", out)
+		}
+	})
+
+	t.Run("--statは--dry-run必須", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"push", "--stat"},
+			{"pull", "--stat"},
+		} {
+			store, _ := setupStoreWithHome(t,
+				map[string]string{"vimrc": "new\n"},
+				map[string]string{".vimrc": "old\n"},
+				singleBaseToml(),
+			)
+			code, _, errOut := runCli(t, store, args)
+			if code == 0 {
+				t.Errorf("Run(%v): exit = 0, want non-zero", args)
+			}
+			if !strings.Contains(errOut, "--stat requires --dry-run") {
+				t.Errorf("Run(%v): stderr should contain --stat requires --dry-run, got %q", args, errOut)
+			}
+		}
+	})
 }

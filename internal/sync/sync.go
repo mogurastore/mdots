@@ -1,11 +1,14 @@
 package sync
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	gd "github.com/amterp/go-delta"
 	"github.com/mogurastore/mdots/internal/config"
@@ -79,19 +82,20 @@ func resolveUseColor(colorMode string) bool {
 	}
 }
 
-func colorizeBold(s string, useColor bool) string {
+func colorize(s, code string, useColor bool) string {
 	if !useColor {
 		return s
 	}
-	return "\x1b[1m" + s + "\x1b[0m"
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
 }
 
-func colorizeYellow(s string, useColor bool) string {
-	if !useColor {
-		return s
-	}
-	return "\x1b[33m" + s + "\x1b[0m"
-}
+func colorizeBold(s string, useColor bool) string { return colorize(s, "1", useColor) }
+
+func colorizeYellow(s string, useColor bool) string { return colorize(s, "33", useColor) }
+
+func colorizeGreen(s string, useColor bool) string { return colorize(s, "32", useColor) }
+
+func colorizeRed(s string, useColor bool) string { return colorize(s, "31", useColor) }
 
 // writeNewFileNotice は欠落時の新規作成予定報告を一本化する。文面自体は従来通り。
 func writeNewFileNotice(sb *strings.Builder, srcLabel, destLabel, body string, useColor bool) {
@@ -138,27 +142,41 @@ func diffContent(srcPath, destPath, srcLabel, destLabel string, colorMode string
 	return sb.String(), false, nil
 }
 
-// PushDryRun は push のプレビューを dest→Store 方向で返す。書き込みは行わない。
+// PushDryRun は push の dry-run 差分を dest→Store 方向で返す。書き込みは行わない。
 // pushで追加される行が+になるよう dest を old、Store を new とする。
 // 両方存在する Entry は inline diff を出し、片方不在の Entry は新規作成予定として報告する。
 // override=false でコピー先が存在する Entry は無出力・差分なし扱いとし、skip 報告はしない。
 // 両方不在・ディレクトリはエラーで中断する。
 func PushDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
-	return diffDryRun(storeRoot, entries, colorMode, "push", false)
+	return diffDryRun(storeRoot, entries, colorMode, "push", false, false)
 }
 
-// PullDryRun は pull のプレビューを Store→dest 方向で返す。書き込みは行わない。
+// PushDryRunStat は push の dry-run 差分をファイル別の変更行数で返す。
+// 差分の方向と override/欠落の扱いは PushDryRun と同じで、書き込みは行わない。
+func PushDryRunStat(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
+	return diffDryRun(storeRoot, entries, colorMode, "push", false, true)
+}
+
+// PullDryRun は pull の dry-run 差分を Store→dest 方向で返す。書き込みは行わない。
 // pullで取り込まれる行が+になるよう Store を old、dest を new とする。
 // override=false でコピー先が存在する Entry は無出力・差分なし扱いとし、skip 報告はしない。
 func PullDryRun(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
-	return diffDryRun(storeRoot, entries, colorMode, "pull", true)
+	return diffDryRun(storeRoot, entries, colorMode, "pull", true, false)
+}
+
+// PullDryRunStat は pull の dry-run 差分をファイル別の変更行数で返す。
+// 差分の方向と override/欠落の扱いは PullDryRun と同じで、書き込みは行わない。
+func PullDryRunStat(storeRoot string, entries []config.Entry, colorMode string) (string, bool, error) {
+	return diffDryRun(storeRoot, entries, colorMode, "pull", true, true)
 }
 
 // diffDryRun は push/pull の差分コアである。isPull=false は dest を old・
 // Store を new とし、true は Store を old・dest を new とする。
-func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op string, isPull bool) (string, bool, error) {
+// stat=true では patch の代わりにファイル別の変更行数を返す。
+func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op string, isPull bool, stat bool) (string, bool, error) {
 	useColor := resolveUseColor(colorMode)
 	var sb strings.Builder
+	var stats []fileStat
 	hasDiff := false
 	for _, e := range entries {
 		destPath, err := config.ExpandDest(e.Dest)
@@ -186,8 +204,16 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 			if destInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: dest is a directory: %s", op, e.Src, destPath)
 			}
-			writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
-			hasDiff = true
+			if stat {
+				added, err := countFileLines(destPath)
+				if err != nil {
+					return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
+				}
+				stats = append(stats, fileStat{label: e.Dest, added: added})
+			} else {
+				writeNewFileNotice(&sb, e.Src, e.Dest, "(new file: "+e.Src+" would be created in Store)\n", useColor)
+				hasDiff = true
+			}
 			continue
 		}
 		if destMissing {
@@ -197,8 +223,16 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 			if srcInfo.IsDir() {
 				return "", false, fmt.Errorf("%s %s: src is a directory: %s", op, e.Src, srcPath)
 			}
-			writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
-			hasDiff = true
+			if stat {
+				added, err := countFileLines(srcPath)
+				if err != nil {
+					return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
+				}
+				stats = append(stats, fileStat{label: e.Src, added: added})
+			} else {
+				writeNewFileNotice(&sb, e.Dest, e.Src, "(new file: "+e.Dest+" would be created)\n", useColor)
+				hasDiff = true
+			}
 			continue
 		}
 		if srcInfo.IsDir() {
@@ -210,13 +244,23 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 		if !e.Override {
 			continue
 		}
-		var d string
-		var same bool
+		oldPath, newPath := destPath, srcPath
+		oldLabel, newLabel := e.Dest, e.Src
 		if isPull {
-			d, same, err = diffContent(srcPath, destPath, e.Src, e.Dest, colorMode)
-		} else {
-			d, same, err = diffContent(destPath, srcPath, e.Dest, e.Src, colorMode)
+			oldPath, newPath = srcPath, destPath
+			oldLabel, newLabel = e.Src, e.Dest
 		}
+		if stat {
+			added, removed, same, err := fileChangeStats(oldPath, newPath)
+			if err != nil {
+				return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
+			}
+			if !same {
+				stats = append(stats, fileStat{label: newLabel, added: added, removed: removed})
+			}
+			continue
+		}
+		d, same, err := diffContent(oldPath, newPath, oldLabel, newLabel, colorMode)
 		if err != nil {
 			return "", false, fmt.Errorf("%s %s: %w", op, e.Src, err)
 		}
@@ -225,7 +269,170 @@ func diffDryRun(storeRoot string, entries []config.Entry, colorMode string, op s
 			hasDiff = true
 		}
 	}
+	if stat {
+		if len(stats) == 0 {
+			return "", false, nil
+		}
+		return renderStat(stats, colorMode), true, nil
+	}
 	return sb.String(), hasDiff, nil
+}
+
+// fileStat は stat 表示の1ファイル分の集計である。
+type fileStat struct {
+	label   string
+	added   int
+	removed int
+}
+
+// statBarMaxWidth は最大の変更量を持つファイルのバー幅である。
+// 変更行数が多い場合は全ファイル共通の比率で縮小する。
+const statBarMaxWidth = 50
+
+// countFileLines は新規ファイルの追加行数として数える行数を返す。
+func countFileLines(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return len(splitStatLines(string(data))), nil
+}
+
+// fileChangeStats は2ファイルの追加・削除行数を返す。同一内容なら same=true。
+func fileChangeStats(oldPath, newPath string) (added, removed int, same bool, err error) {
+	oldData, err := os.ReadFile(oldPath)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	newData, err := os.ReadFile(newPath)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if bytes.Equal(oldData, newData) {
+		return 0, 0, true, nil
+	}
+	added, removed = lineDiffCounts(splitStatLines(string(oldData)), splitStatLines(string(newData)))
+	return added, removed, false, nil
+}
+
+// splitStatLines は行末改行を行に含めたまま分割する。
+// "a\nb\n" は2行、"a\nb" も2行、空文字列は0行である。
+func splitStatLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.SplitAfter(s, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// lineDiffCounts は Myers の編集距離から追加・削除行数を求める。
+func lineDiffCounts(old, new []string) (added, removed int) {
+	n, m := len(old), len(new)
+	if n == 0 {
+		return m, 0
+	}
+	if m == 0 {
+		return 0, n
+	}
+	max := n + m
+	v := make([]int, 2*max+1)
+	offset := max
+	for d := 0; d <= max; d++ {
+		for k := -d; k <= d; k += 2 {
+			var x int
+			if k == -d || (k != d && v[offset+k-1] < v[offset+k+1]) {
+				x = v[offset+k+1]
+			} else {
+				x = v[offset+k-1] + 1
+			}
+			y := x - k
+			for x < n && y < m && old[x] == new[y] {
+				x++
+				y++
+			}
+			v[offset+k] = x
+			if x >= n && y >= m {
+				removed = (d + n - m) / 2
+				return d - removed, removed
+			}
+		}
+	}
+	return m, n
+}
+
+// renderStat はファイル別の変更行数と集計行を git diff --stat 風に返す。
+func renderStat(stats []fileStat, colorMode string) string {
+	useColor := resolveUseColor(colorMode)
+	labelWidth, totalWidth, maxTotal := 0, 1, 0
+	totalAdded, totalRemoved := 0, 0
+	for _, s := range stats {
+		if w := utf8.RuneCountInString(s.label); w > labelWidth {
+			labelWidth = w
+		}
+		total := s.added + s.removed
+		if w := len(strconv.Itoa(total)); w > totalWidth {
+			totalWidth = w
+		}
+		if total > maxTotal {
+			maxTotal = total
+		}
+		totalAdded += s.added
+		totalRemoved += s.removed
+	}
+
+	var sb strings.Builder
+	for _, s := range stats {
+		total := s.added + s.removed
+		added, removed := scaleStatBar(s.added, s.removed, maxTotal)
+		bar := colorizeGreen(strings.Repeat("+", added), useColor) +
+			colorizeRed(strings.Repeat("-", removed), useColor)
+		padding := strings.Repeat(" ", labelWidth-utf8.RuneCountInString(s.label))
+		fmt.Fprintf(&sb, " %s%s | %*d %s\n", s.label, padding, totalWidth, total, bar)
+	}
+	fmt.Fprintf(&sb, " %d %s changed", len(stats), pluralize(len(stats), "file"))
+	if totalAdded > 0 {
+		fmt.Fprintf(&sb, ", %d %s(+)", totalAdded, pluralize(totalAdded, "insertion"))
+	}
+	if totalRemoved > 0 {
+		fmt.Fprintf(&sb, ", %d %s(-)", totalRemoved, pluralize(totalRemoved, "deletion"))
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// scaleStatBar は最大の変更量を statBarMaxWidth に合わせ、全ファイル共通の比率で縮小する。
+func scaleStatBar(added, removed, maxTotal int) (int, int) {
+	if maxTotal <= statBarMaxWidth {
+		return added, removed
+	}
+	a := added * statBarMaxWidth / maxTotal
+	r := removed * statBarMaxWidth / maxTotal
+	if added > 0 && a == 0 {
+		a = 1
+	}
+	if removed > 0 && r == 0 {
+		r = 1
+	}
+	for a+r > statBarMaxWidth {
+		if a >= r && a > 1 {
+			a--
+		} else if r > 1 {
+			r--
+		} else {
+			break
+		}
+	}
+	return a, r
+}
+
+func pluralize(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // Pull は dest を Store の src へファイルコピーする。

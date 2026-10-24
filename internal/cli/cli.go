@@ -110,6 +110,11 @@ func dryRunFlag() cliv3.Flag {
 	return &cliv3.BoolFlag{Name: "dry-run", Aliases: []string{"n"}, Usage: "書き込まず差分を出力する"}
 }
 
+// statFlag は --stat の宣言である。--dry-run と併用し、差分をファイル別の変更行数で表示する。
+func statFlag() cliv3.Flag {
+	return &cliv3.BoolFlag{Name: "stat", Usage: "dry-runの差分をファイル別の変更行数で表示する"}
+}
+
 // newCommand はコマンド宣言ツリーを組み立てる。help/usage/unknown表示は
 // 枠組み既定に任せ、--target の定義だけを宣言する。
 // フラグ解釈失敗時（未知フラグ・値なし・Validator拒否）は OnUsageError 既定（nil）の
@@ -158,6 +163,7 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
+					statFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pullAction,
@@ -169,6 +175,7 @@ func (r *runner) newCommand() *cliv3.Command {
 					targetFlag(),
 					dryRunFlag(),
 					colorFlag(),
+					statFlag(),
 				},
 				Before: r.rejectExtraArgs(0),
 				Action: r.pushAction,
@@ -211,13 +218,23 @@ func (r *runner) pushAction(_ context.Context, cmd *cliv3.Command) error {
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
-		if code := app.PushDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
+		var code int
+		if cmd.Bool("stat") {
+			code = app.PushDryRunStat(r.cwd, target, color, r.stdout, r.stderr)
+		} else {
+			code = app.PushDryRun(r.cwd, target, color, r.stdout, r.stderr)
+		}
+		if code != 0 {
 			return &exitError{code: code}
 		}
 		return nil
 	}
 	if cmd.IsSet("color") {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
+		return &exitError{code: 1}
+	}
+	if cmd.IsSet("stat") {
+		fmt.Fprintln(r.stderr, "--stat requires --dry-run")
 		return &exitError{code: 1}
 	}
 	if err := app.Push(r.cwd, target, r.stdout, r.stderr); err != nil {
@@ -231,13 +248,23 @@ func (r *runner) pullAction(_ context.Context, cmd *cliv3.Command) error {
 	target := cmd.String("target")
 	if cmd.Bool("dry-run") {
 		color := cmd.String("color")
-		if code := app.PullDryRun(r.cwd, target, color, r.stdout, r.stderr); code != 0 {
+		var code int
+		if cmd.Bool("stat") {
+			code = app.PullDryRunStat(r.cwd, target, color, r.stdout, r.stderr)
+		} else {
+			code = app.PullDryRun(r.cwd, target, color, r.stdout, r.stderr)
+		}
+		if code != 0 {
 			return &exitError{code: code}
 		}
 		return nil
 	}
 	if cmd.IsSet("color") {
 		fmt.Fprintln(r.stderr, "--color requires --dry-run")
+		return &exitError{code: 1}
+	}
+	if cmd.IsSet("stat") {
+		fmt.Fprintln(r.stderr, "--stat requires --dry-run")
 		return &exitError{code: 1}
 	}
 	if err := app.Pull(r.cwd, target, r.stdout, r.stderr); err != nil {

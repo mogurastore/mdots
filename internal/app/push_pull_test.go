@@ -597,3 +597,39 @@ func TestDryRunRepresentative(t *testing.T) {
 		}
 	})
 }
+
+// Seam: 実行系境界 (push/pull --dry-run --stat の代表例)
+func TestDryRunStatRepresentative(t *testing.T) {
+	store, _ := setupStoreWithHome(t,
+		map[string]string{"vimrc": "new\n"},
+		map[string]string{".vimrc": "old\n"},
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
+	)
+
+	var out, errOut bytes.Buffer
+	if code := PushDryRunStat(store, "", "never", &out, &errOut); code == 0 {
+		t.Error("PushDryRunStat with changes: exit = 0, want non-zero")
+	}
+	for _, want := range []string{" vimrc | 2 +-", " 1 file changed, 1 insertion(+), 1 deletion(-)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout should contain %q, got %q", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "---") {
+		t.Errorf("stat must not contain patch headers, got %q", out.String())
+	}
+
+	store, _ = setupStoreWithHome(t,
+		map[string]string{"vimrc": "same\n"},
+		map[string]string{".vimrc": "same\n"},
+		"default_target = \"base\"\n[targets.base.\"~/.vimrc\"]\nsrc = \"vimrc\"\n",
+	)
+	out.Reset()
+	errOut.Reset()
+	if code := PushDryRunStat(store, "", "never", &out, &errOut); code != 0 {
+		t.Errorf("PushDryRunStat without changes: exit = %d, want 0", code)
+	}
+	if out.String() != "No changes.\n" {
+		t.Errorf("stdout = %q, want No changes.", out.String())
+	}
+}

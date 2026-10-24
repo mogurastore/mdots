@@ -211,15 +211,15 @@ func emitDiff(stdout io.Writer, out string, hasDiff bool) int {
 	return 0
 }
 
-// PushDryRun は push の差分を stdout に出し、書き込みは行わない。
-// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
-func PushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
+// runDryRun は push/pull の dry-run 系の共有本体である。
+// Store解決・Target解決・差分生成・exit 対応を一本化し、各 action は薄い委譲に留める。
+func runDryRun(cwd, target, color string, stdout, stderr io.Writer, dryRunFn func(string, []config.Entry, string) (string, bool, error)) int {
 	store, entries, err := resolveEntries(cwd, target)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	out, hasDiff, err := sync.PushDryRun(store, entries, color)
+	out, hasDiff, err := dryRunFn(store, entries, color)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -227,18 +227,26 @@ func PushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int 
 	return emitDiff(stdout, out, hasDiff)
 }
 
+// PushDryRun は push の差分を stdout に出し、書き込みは行わない。
+// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
+func PushDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
+	return runDryRun(cwd, target, color, stdout, stderr, sync.PushDryRun)
+}
+
+// PushDryRunStat は push の差分をファイル別の変更行数で stdout に出し、書き込みは行わない。
+// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
+func PushDryRunStat(cwd string, target, color string, stdout, stderr io.Writer) int {
+	return runDryRun(cwd, target, color, stdout, stderr, sync.PushDryRunStat)
+}
+
 // PullDryRun は pull の差分を stdout に出し、書き込みは行わない。
 // target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
 func PullDryRun(cwd string, target, color string, stdout, stderr io.Writer) int {
-	store, entries, err := resolveEntries(cwd, target)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	out, hasDiff, err := sync.PullDryRun(store, entries, color)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	return emitDiff(stdout, out, hasDiff)
+	return runDryRun(cwd, target, color, stdout, stderr, sync.PullDryRun)
+}
+
+// PullDryRunStat は pull の差分をファイル別の変更行数で stdout に出し、書き込みは行わない。
+// target 省略時は default_target へ解決する。差分ありは exit 1、差分なしは exit 0。
+func PullDryRunStat(cwd string, target, color string, stdout, stderr io.Writer) int {
+	return runDryRun(cwd, target, color, stdout, stderr, sync.PullDryRunStat)
 }

@@ -32,6 +32,9 @@ mdots add ~/.vimrc
 # 3. 差分を確認してからStoreに回収する（dest -> Store）
 mdots pull --dry-run
 mdots pull
+
+# ファイル別の変更行数だけ確認する
+mdots pull --dry-run --stat
 ```
 
 Storeから環境へ展開します。
@@ -40,6 +43,9 @@ Storeから環境へ展開します。
 # 差分を確認してから展開する（Store -> dest）
 mdots push --dry-run
 mdots push
+
+# ファイル別の変更行数だけ確認する
+mdots push --dry-run --stat
 ```
 
 ### 複数環境で使う場合
