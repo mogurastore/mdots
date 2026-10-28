@@ -2,8 +2,8 @@ github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/amterp/color v1.20.1 h1:YDjwZ0X6IfK0OuZl8P2KLkV0WuH2pvttrEwr+ZbRbYU=
 github.com/amterp/color v1.20.1/go.mod h1:XRJ2OonPd9eRKRg6ddVJc6Yv/rvjzMhn+qdIDHKjE04=
-github.com/amterp/go-delta v0.2.0 h1:7/AcPSzcVWvKjuMY7MX4eCTzy+HIwOHrJbhNeZeFFxM=
-github.com/amterp/go-delta v0.2.0/go.mod h1:yk5/XBPvbBX2JnkdKyWtLEZFmSUsj3NMhcTDHfVt7BY=
+github.com/amterp/go-delta v0.2.1 h1:iwaF3G/fSF8bEN/xhlqEn+OOoimDEwtcBqS+nktvzaA=
+github.com/amterp/go-delta v0.2.1/go.mod h1:yk5/XBPvbBX2JnkdKyWtLEZFmSUsj3NMhcTDHfVt7BY=
 github.com/clipperhouse/uax29/v2 v2.2.0 h1:ChwIKnQN3kcZteTXMgb1wztSgaU+ZemkgWdohwgs8tY=
 github.com/clipperhouse/uax29/v2 v2.2.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
